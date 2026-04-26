@@ -16,6 +16,20 @@
         <el-table-column prop="endpoint" label="地址" />
         <el-table-column prop="wg_port" label="端口" width="80" />
         <el-table-column prop="address_pool" label="地址池" />
+        <el-table-column label="客户端" width="80" align="center">
+          <template #default="{ row }">
+            <span v-if="row.online">{{ row.peer_count }}</span>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="访问限制" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="getBlockedCount(row) > 0" type="warning" size="small">
+              {{ getBlockedCount(row) }}条
+            </el-tag>
+            <span v-else class="text-muted">无</span>
+          </template>
+        </el-table-column>
         <el-table-column label="限速" width="120">
           <template #default="{ row }">
             <span v-if="row.default_upload_limit > 0 || row.default_download_limit > 0">
@@ -38,10 +52,10 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="320">
+        <el-table-column label="操作" width="350">
           <template #default="{ row }">
             <el-button size="small" @click="showDetail(row)">查看</el-button>
-            <el-button size="small" @click="syncNode(row)">同步</el-button>
+            <el-button size="small" @click="showAccessControl(row)">访问控制</el-button>
             <el-button size="small" @click="showDialog(row)">编辑</el-button>
             <el-button
               size="small"
@@ -64,6 +78,10 @@
         <el-descriptions-item label="WG端口">{{ detailData.wg_port }}</el-descriptions-item>
         <el-descriptions-item label="接口名">{{ detailData.wg_interface }}</el-descriptions-item>
         <el-descriptions-item label="地址池">{{ detailData.address_pool }}</el-descriptions-item>
+        <el-descriptions-item label="客户端数">
+          <span v-if="detailData.online">{{ detailData.peer_count }}</span>
+          <span v-else class="text-muted">节点离线</span>
+        </el-descriptions-item>
         <el-descriptions-item label="DNS">{{ detailData.dns }}</el-descriptions-item>
         <el-descriptions-item label="MTU">{{ detailData.mtu }}</el-descriptions-item>
         <el-descriptions-item label="Keepalive">{{ detailData.keepalive }}秒</el-descriptions-item>
@@ -99,6 +117,41 @@
       </el-descriptions>
       <template #footer>
         <el-button @click="detailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 访问控制对话框 -->
+    <el-dialog v-model="accessControlVisible" title="访问控制" width="550px">
+      <div class="access-control-header">
+        <span>设置禁止访问此节点的用户名模式（支持正则表达式）</span>
+      </div>
+      <div class="pattern-input">
+        <el-input
+          v-model="newPattern"
+          placeholder="输入用户名或正则表达式，如: test.* 或 ^user[0-9]+$"
+          @keyup.enter="addPattern"
+        >
+          <template #append>
+            <el-button @click="addPattern" :disabled="!newPattern">添加</el-button>
+          </template>
+        </el-input>
+      </div>
+      <div class="pattern-list" v-if="patterns.length > 0">
+        <el-tag
+          v-for="(pattern, index) in patterns"
+          :key="index"
+          closable
+          type="warning"
+          class="pattern-tag"
+          @close="removePattern(index)"
+        >
+          {{ pattern }}
+        </el-tag>
+      </div>
+      <el-empty v-else description="暂无访问限制" :image-size="60" />
+      <template #footer>
+        <el-button @click="accessControlVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveAccessControl" :loading="savingAccess">保存</el-button>
       </template>
     </el-dialog>
 
@@ -166,6 +219,13 @@ const editId = ref(null)
 const formRef = ref()
 const detailData = ref({})
 
+// 访问控制相关
+const accessControlVisible = ref(false)
+const savingAccess = ref(false)
+const currentNode = ref(null)
+const patterns = ref([])
+const newPattern = ref('')
+
 const form = reactive({
   name: '',
   endpoint: '',
@@ -186,6 +246,16 @@ const rules = {
   endpoint: [{ required: true, message: '请输入地址', trigger: 'blur' }],
   address_pool: [{ required: true, message: '请输入地址池', trigger: 'blur' }],
   api_url: [{ required: true, message: '请输入Agent URL', trigger: 'blur' }]
+}
+
+function getBlockedCount(node) {
+  if (!node.blocked_patterns) return 0
+  try {
+    const arr = JSON.parse(node.blocked_patterns)
+    return Array.isArray(arr) ? arr.length : 0
+  } catch {
+    return 0
+  }
 }
 
 async function fetchNodes() {
@@ -209,6 +279,42 @@ function copyToClipboard(text) {
   }).catch(() => {
     ElMessage.error('复制失败')
   })
+}
+
+function showAccessControl(node) {
+  currentNode.value = node
+  try {
+    patterns.value = node.blocked_patterns ? JSON.parse(node.blocked_patterns) : []
+  } catch {
+    patterns.value = []
+  }
+  newPattern.value = ''
+  accessControlVisible.value = true
+}
+
+function addPattern() {
+  if (newPattern.value && !patterns.value.includes(newPattern.value)) {
+    patterns.value.push(newPattern.value)
+    newPattern.value = ''
+  }
+}
+
+function removePattern(index) {
+  patterns.value.splice(index, 1)
+}
+
+async function saveAccessControl() {
+  savingAccess.value = true
+  try {
+    await api.put(`/api/nodes/${currentNode.value.id}`, {
+      blocked_patterns: JSON.stringify(patterns.value)
+    })
+    ElMessage.success('访问控制设置已保存')
+    accessControlVisible.value = false
+    fetchNodes()
+  } finally {
+    savingAccess.value = false
+  }
 }
 
 function showDialog(node = null) {
@@ -275,19 +381,6 @@ async function submitForm() {
   }
 }
 
-async function syncNode(node) {
-  try {
-    const { data } = await api.post(`/api/nodes/${node.id}/sync`)
-    if (data.synced) {
-      ElMessage.success('同步成功')
-    } else {
-      ElMessage.warning(`同步失败: ${data.error}`)
-    }
-  } catch (error) {
-    console.error(error)
-  }
-}
-
 async function toggleStatus(node) {
   const action = node.status === 'active' ? '禁用' : '启用'
   try {
@@ -303,9 +396,32 @@ async function toggleStatus(node) {
 async function deleteNode(node) {
   try {
     await ElMessageBox.confirm('确定要删除此节点吗?', '确认', { type: 'warning' })
-    await api.delete(`/api/nodes/${node.id}`)
-    ElMessage.success('删除成功')
-    fetchNodes()
+    try {
+      await api.delete(`/api/nodes/${node.id}`)
+      ElMessage.success('删除成功')
+      fetchNodes()
+    } catch (error) {
+      // 如果有Peer存在，提示是否强制删除
+      if (error.response?.status === 400) {
+        const detail = error.response.data.detail
+        if (detail.includes('Peer')) {
+          try {
+            await ElMessageBox.confirm(
+              `${detail}\n\n是否强制删除？这将清空该节点下的所有Peer。`,
+              '强制删除确认',
+              { type: 'warning', confirmButtonText: '强制删除', cancelButtonText: '取消' }
+            )
+            await api.delete(`/api/nodes/${node.id}?force=true`)
+            ElMessage.success('节点及所有Peer已删除')
+            fetchNodes()
+          } catch (e) {
+            if (e !== 'cancel') console.error(e)
+          }
+          return
+        }
+      }
+      throw error
+    }
   } catch (error) {
     if (error !== 'cancel') console.error(error)
   }
@@ -342,5 +458,25 @@ onMounted(fetchNodes)
   font-family: monospace;
   font-size: 12px;
   word-break: break-all;
+}
+
+.access-control-header {
+  margin-bottom: 16px;
+  color: #606266;
+  font-size: 14px;
+}
+
+.pattern-input {
+  margin-bottom: 16px;
+}
+
+.pattern-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pattern-tag {
+  font-family: monospace;
 }
 </style>

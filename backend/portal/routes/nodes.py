@@ -1,4 +1,6 @@
 import httpx
+import json
+import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -26,6 +28,23 @@ async def check_node_online(node: Node) -> bool:
         return False
 
 
+def is_user_blocked(node: Node, username: str) -> bool:
+    """检查用户是否被禁止访问该节点"""
+    if not node.blocked_patterns:
+        return False
+    try:
+        patterns = json.loads(node.blocked_patterns)
+        for pattern in patterns:
+            try:
+                if re.match(pattern, username):
+                    return True
+            except re.error:
+                pass  # 忽略无效的正则表达式
+    except json.JSONDecodeError:
+        pass
+    return False
+
+
 @router.get("")
 async def get_nodes(
     db: Session = Depends(get_db),
@@ -36,6 +55,10 @@ async def get_nodes(
 
     result = []
     for node in nodes:
+        # 检查用户是否被禁止访问该节点
+        if is_user_blocked(node, current_user.username):
+            continue  # 跳过被禁止的节点
+
         is_online = await check_node_online(node)
         result.append({
             "id": node.id,

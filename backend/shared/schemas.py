@@ -110,6 +110,7 @@ class NodeUpdate(BaseModel):
     default_download_limit: Optional[int] = None
     api_url: Optional[str] = None
     api_key: Optional[str] = None
+    blocked_patterns: Optional[str] = None  # JSON数组格式的正则列表
 
 
 class NodeResponse(BaseModel):
@@ -127,6 +128,7 @@ class NodeResponse(BaseModel):
     default_download_limit: int
     status: str
     api_url: str
+    blocked_patterns: Optional[str] = None
     created_at: datetime
 
     class Config:

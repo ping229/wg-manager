@@ -91,7 +91,7 @@ async def remove_peer_from_agent(node: Node, public_key: str):
 
 
 @router.get("", response_model=ConfigResponse)
-def get_config(
+async def get_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -102,6 +102,23 @@ def get_config(
         raise HTTPException(status_code=404, detail="尚未生成配置")
 
     node = db.query(Node).filter(Node.id == peer.node_id).first()
+
+    # 从Agent同步公钥
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{node.api_url.rstrip('/')}/api/status",
+                headers={"X-API-Key": encryption.decrypt(node.api_key)},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                status = response.json()
+                if status.get("public_key") and status["public_key"] != node.public_key:
+                    node.public_key = status["public_key"]
+                    db.commit()
+                    print(f"Updated node {node.name} public_key from Agent")
+    except Exception as e:
+        print(f"Warning: Failed to sync public key from Agent: {e}")
 
     return ConfigResponse(
         peer=peer,
@@ -116,10 +133,43 @@ async def generate_config(
     current_user: User = Depends(get_current_user)
 ):
     """生成新配置"""
+    import json
+    import re
+
     # 检查节点
     node = db.query(Node).filter(Node.id == data.node_id, Node.status == "active").first()
     if not node:
         raise HTTPException(status_code=404, detail="节点不存在或已禁用")
+
+    # 检查用户是否被禁止访问该节点
+    if node.blocked_patterns:
+        try:
+            patterns = json.loads(node.blocked_patterns)
+            for pattern in patterns:
+                try:
+                    if re.match(pattern, current_user.username):
+                        raise HTTPException(status_code=403, detail="您被禁止使用此节点")
+                except re.error:
+                    pass  # 忽略无效的正则表达式
+        except json.JSONDecodeError:
+            pass  # 忽略无效的JSON
+
+    # 从Agent获取实际的公钥
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{node.api_url.rstrip('/')}/api/status",
+                headers={"X-API-Key": encryption.decrypt(node.api_key)},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                status = response.json()
+                if status.get("public_key") and status["public_key"] != node.public_key:
+                    node.public_key = status["public_key"]
+                    db.commit()
+                    print(f"Updated node {node.name} public_key from Agent")
+    except Exception as e:
+        print(f"Warning: Failed to sync public key from Agent: {e}")
 
     # 检查用户是否已有Peer
     existing_peer = db.query(Peer).filter(Peer.user_id == current_user.id).first()
@@ -214,7 +264,7 @@ def update_settings(
 
 
 @router.get("/download")
-def download_config(
+async def download_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -229,6 +279,27 @@ def download_config(
     # 生成配置文件内容
     private_key = encryption.decrypt(peer.private_key)
 
+    # 从Agent获取实际的公钥（确保使用正确的公钥）
+    node_public_key = node.public_key  # 默认使用数据库中的公钥
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{node.api_url.rstrip('/')}/api/status",
+                headers={"X-API-Key": encryption.decrypt(node.api_key)},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                status = response.json()
+                if status.get("public_key"):
+                    node_public_key = status["public_key"]
+                    # 如果公钥不一致，更新数据库
+                    if node_public_key != node.public_key:
+                        node.public_key = node_public_key
+                        db.commit()
+                        print(f"Updated node {node.name} public_key from Agent")
+    except Exception as e:
+        print(f"Warning: Failed to get public key from Agent: {e}")
+
     # Endpoint 格式: IP:端口 或 域名:端口
     endpoint = f"{node.endpoint}:{node.wg_port}"
 
@@ -239,7 +310,7 @@ DNS = {peer.dns}
 MTU = {peer.mtu}
 
 [Peer]
-PublicKey = {node.public_key}
+PublicKey = {node_public_key}
 Endpoint = {endpoint}
 AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = {peer.keepalive}

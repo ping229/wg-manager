@@ -68,6 +68,7 @@ class Node(Base):
     status = Column(String(20), default="active")  # active, disabled
     api_url = Column(String(255), nullable=False)  # Agent API地址
     api_key = Column(String(100), nullable=False)  # API密钥(加密存储)
+    blocked_patterns = Column(Text, nullable=True)  # 禁止访问的用户名正则列表(JSON数组)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     peers = relationship("Peer", back_populates="node")

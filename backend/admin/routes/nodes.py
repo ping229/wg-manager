@@ -66,6 +66,23 @@ async def list_nodes(
     result = []
     for node in nodes:
         is_online = await check_node_online(node)
+
+        # 从Agent获取实际peer数量
+        peer_count = 0
+        if is_online:
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        f"{node.api_url.rstrip('/')}/api/status",
+                        headers={"X-API-Key": encryption.decrypt(node.api_key)},
+                        timeout=3.0
+                    )
+                    if response.status_code == 200:
+                        status = response.json()
+                        peer_count = status.get("peer_count", 0)
+            except Exception:
+                pass
+
         result.append({
             "id": node.id,
             "name": node.name,
@@ -81,8 +98,10 @@ async def list_nodes(
             "default_download_limit": node.default_download_limit or 0,
             "status": node.status,
             "online": is_online,
+            "peer_count": peer_count,
             "api_url": node.api_url,
             "api_key": encryption.decrypt(node.api_key),  # 返回解密后的API密钥
+            "blocked_patterns": node.blocked_patterns,
             "created_at": node.created_at
         })
 
@@ -118,6 +137,7 @@ async def get_node(
         "online": is_online,
         "api_url": node.api_url,
         "api_key": encryption.decrypt(node.api_key),
+        "blocked_patterns": node.blocked_patterns,
         "created_at": node.created_at
     }
 
@@ -178,7 +198,7 @@ def update_node(
             raise HTTPException(status_code=400, detail="节点名称已存在")
         node.name = data.name
 
-    for field in ["endpoint", "wg_port", "wg_interface", "address_pool", "dns", "mtu", "keepalive", "default_upload_limit", "default_download_limit", "api_url"]:
+    for field in ["endpoint", "wg_port", "wg_interface", "address_pool", "dns", "mtu", "keepalive", "default_upload_limit", "default_download_limit", "api_url", "blocked_patterns"]:
         value = getattr(data, field, None)
         if value is not None:
             setattr(node, field, value)
@@ -193,25 +213,46 @@ def update_node(
 
 
 @router.delete("/{node_id}")
-def delete_node(
+async def delete_node(
     node_id: int,
+    force: bool = False,
     db: Session = Depends(get_db),
     current_admin: Admin = Depends(get_current_admin)
 ):
-    """删除节点"""
+    """删除节点
+
+    Args:
+        force: 是否强制删除。如果为True，会先清空所有Peer再删除节点
+    """
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="节点不存在")
 
     # 检查是否有Peer
-    peer_count = db.query(Peer).filter(Peer.node_id == node_id).count()
-    if peer_count > 0:
-        raise HTTPException(status_code=400, detail=f"该节点下还有 {peer_count} 个Peer,请先清空")
+    peers = db.query(Peer).filter(Peer.node_id == node_id).all()
+
+    if peers:
+        if not force:
+            raise HTTPException(
+                status_code=400,
+                detail=f"该节点下还有 {len(peers)} 个Peer，请先清空或使用强制删除"
+            )
+
+        # 强制删除模式：先清空Agent上的所有Peer，然后删除数据库记录
+        try:
+            await call_agent(node, "/api/peer/clear")
+        except HTTPException as e:
+            # 即使Agent调用失败也继续删除（Agent可能已离线）
+            pass
+
+        # 删除数据库中的所有Peer
+        for peer in peers:
+            db.delete(peer)
 
     db.delete(node)
     db.commit()
 
-    return {"message": "节点已删除"}
+    return {"message": "节点已删除", "cleared_peers": len(peers)}
 
 
 @router.post("/{node_id}/disable")

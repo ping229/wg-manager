@@ -27,7 +27,7 @@ async def remove_peer_from_agent(node: Node, public_key: str):
             pass
 
 
-@router.get("", response_model=list[UserResponse])
+@router.get("")
 def list_users(
     status: str = None,
     db: Session = Depends(get_db),
@@ -38,10 +38,36 @@ def list_users(
     if status:
         query = query.filter(User.status == status)
     users = query.all()
-    return users
+
+    result = []
+    for user in users:
+        # 查找用户的Peer信息
+        peer = db.query(Peer).filter(Peer.user_id == user.id).first()
+        peer_info = None
+        if peer:
+            node = db.query(Node).filter(Node.id == peer.node_id).first()
+            peer_info = {
+                "id": peer.id,
+                "node_id": peer.node_id,
+                "node_name": node.name if node else None,
+                "address": peer.address,
+                "created_at": peer.created_at
+            }
+
+        result.append({
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "status": user.status,
+            "created_at": user.created_at,
+            "approved_at": user.approved_at,
+            "peer": peer_info
+        })
+
+    return result
 
 
-@router.get("/{user_id}", response_model=UserResponse)
+@router.get("/{user_id}")
 def get_user(
     user_id: int,
     db: Session = Depends(get_db),
@@ -51,7 +77,29 @@ def get_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    return user
+
+    # 查找用户的Peer信息
+    peer = db.query(Peer).filter(Peer.user_id == user.id).first()
+    peer_info = None
+    if peer:
+        node = db.query(Node).filter(Node.id == peer.node_id).first()
+        peer_info = {
+            "id": peer.id,
+            "node_id": peer.node_id,
+            "node_name": node.name if node else None,
+            "address": peer.address,
+            "created_at": peer.created_at
+        }
+
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "status": user.status,
+        "created_at": user.created_at,
+        "approved_at": user.approved_at,
+        "peer": peer_info
+    }
 
 
 @router.put("/{user_id}")
@@ -149,3 +197,29 @@ def delete_user(
     db.commit()
 
     return {"message": "用户已删除"}
+
+
+@router.delete("/{user_id}/peer")
+async def delete_user_peer(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """删除用户的Peer配置"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    peer = db.query(Peer).filter(Peer.user_id == user_id).first()
+    if not peer:
+        raise HTTPException(status_code=404, detail="该用户没有Peer配置")
+
+    # 从Agent删除Peer
+    node = db.query(Node).filter(Node.id == peer.node_id).first()
+    if node:
+        await remove_peer_from_agent(node, peer.public_key)
+
+    db.delete(peer)
+    db.commit()
+
+    return {"message": "Peer配置已删除"}

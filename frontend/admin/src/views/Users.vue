@@ -13,8 +13,17 @@
       </template>
 
       <el-table :data="users" v-loading="loading">
-        <el-table-column prop="username" label="用户名" />
+        <el-table-column prop="username" label="用户名" width="120" />
         <el-table-column prop="email" label="邮箱" />
+        <el-table-column label="Peer状态" width="180">
+          <template #default="{ row }">
+            <div v-if="row.peer">
+              <el-tag type="success" size="small">已配置</el-tag>
+              <span class="peer-node">{{ row.peer.node_name }}</span>
+            </div>
+            <el-tag v-else type="info" size="small">未配置</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.status === 'active' ? 'success' : 'danger'">
@@ -27,9 +36,17 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="280">
           <template #default="{ row }">
             <el-button size="small" @click="showEditDialog(row)">编辑</el-button>
+            <el-button
+              v-if="row.peer"
+              size="small"
+              type="danger"
+              @click="deletePeer(row)"
+            >
+              删除Peer
+            </el-button>
             <el-button
               size="small"
               :type="row.status === 'active' ? 'warning' : 'success'"
@@ -122,6 +139,21 @@ async function updateUser() {
   }
 }
 
+async function deletePeer(user) {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除用户 "${user.username}" 的Peer配置吗？\n这将同时从Agent删除配置，用户将无法继续使用VPN。`,
+      '删除Peer确认',
+      { type: 'warning' }
+    )
+    await api.delete(`/api/users/${user.id}/peer`)
+    ElMessage.success('Peer配置已删除')
+    fetchUsers()
+  } catch (error) {
+    if (error !== 'cancel') console.error(error)
+  }
+}
+
 async function toggleStatus(user) {
   const action = user.status === 'active' ? '禁用' : '启用'
   try {
@@ -157,5 +189,11 @@ onMounted(fetchUsers)
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.peer-node {
+  margin-left: 8px;
+  color: #606266;
+  font-size: 12px;
 }
 </style>
