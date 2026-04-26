@@ -156,7 +156,13 @@ sudo bash install.sh
 | ENCRYPTION_KEY | 数据加密密钥 | 随机生成 |
 | SUPER_ADMIN_PASSWORD | 超级管理员密码 | admin123 |
 | DATABASE_URL | 数据库连接 | SQLite |
+| PORTAL_HOST | Portal 监听地址 | 0.0.0.0 |
+| PORTAL_PORT | Portal 端口 | 8080 |
+| ADMIN_HOST | Admin 监听地址 | 127.0.0.1 |
+| ADMIN_PORT | Admin 端口 | 8081 |
 | ADMIN_URL | Admin 管理后台地址 | http://127.0.0.1:8081 |
+| AGENT_HOST | Agent 监听地址 | 127.0.0.1 |
+| AGENT_PORT | Agent 端口 | 8082 |
 
 ### 端口说明
 

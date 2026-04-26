@@ -22,17 +22,17 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "change-this-encryption-key-32bytes!!")
 
     # Portal服务配置
-    PORTAL_HOST: str = "0.0.0.0"
-    PORTAL_PORT: int = 8080
+    PORTAL_HOST: str = os.getenv("PORTAL_HOST", "0.0.0.0")
+    PORTAL_PORT: int = int(os.getenv("PORTAL_PORT", "8080"))
 
     # Admin服务配置
-    ADMIN_HOST: str = "127.0.0.1"
-    ADMIN_PORT: int = 8081
-    ADMIN_URL: str = "http://127.0.0.1:8081"  # Admin管理后台地址，Portal可跳转
+    ADMIN_HOST: str = os.getenv("ADMIN_HOST", "127.0.0.1")
+    ADMIN_PORT: int = int(os.getenv("ADMIN_PORT", "8081"))
+    ADMIN_URL: str = os.getenv("ADMIN_URL", "http://127.0.0.1:8081")
 
     # Agent服务配置
-    AGENT_HOST: str = "127.0.0.1"
-    AGENT_PORT: int = 8082
+    AGENT_HOST: str = os.getenv("AGENT_HOST", "127.0.0.1")
+    AGENT_PORT: int = int(os.getenv("AGENT_PORT", "8082"))
 
     # WireGuard配置
     WG_DEFAULT_PORT: int = 51820

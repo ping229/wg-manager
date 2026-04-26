@@ -38,8 +38,9 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280">
+        <el-table-column label="操作" width="320">
           <template #default="{ row }">
+            <el-button size="small" @click="showDetail(row)">查看</el-button>
             <el-button size="small" @click="syncNode(row)">同步</el-button>
             <el-button size="small" @click="showDialog(row)">编辑</el-button>
             <el-button
@@ -54,6 +55,52 @@
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 查看详情对话框 -->
+    <el-dialog v-model="detailVisible" title="节点详情" width="500px">
+      <el-descriptions :column="1" border>
+        <el-descriptions-item label="名称">{{ detailData.name }}</el-descriptions-item>
+        <el-descriptions-item label="公网地址">{{ detailData.endpoint }}</el-descriptions-item>
+        <el-descriptions-item label="WG端口">{{ detailData.wg_port }}</el-descriptions-item>
+        <el-descriptions-item label="接口名">{{ detailData.wg_interface }}</el-descriptions-item>
+        <el-descriptions-item label="地址池">{{ detailData.address_pool }}</el-descriptions-item>
+        <el-descriptions-item label="DNS">{{ detailData.dns }}</el-descriptions-item>
+        <el-descriptions-item label="MTU">{{ detailData.mtu }}</el-descriptions-item>
+        <el-descriptions-item label="Keepalive">{{ detailData.keepalive }}秒</el-descriptions-item>
+        <el-descriptions-item label="上传限速">
+          {{ detailData.default_upload_limit > 0 ? detailData.default_upload_limit + ' Mbps' : '不限速' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="下载限速">
+          {{ detailData.default_download_limit > 0 ? detailData.default_download_limit + ' Mbps' : '不限速' }}
+        </el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="detailData.status === 'active' ? 'primary' : 'info'" size="small">
+            {{ detailData.status === 'active' ? '已启用' : '已禁用' }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="Agent URL">
+          <div class="copy-field">
+            <span>{{ detailData.api_url }}</span>
+            <el-button size="small" text @click="copyToClipboard(detailData.api_url)">复制</el-button>
+          </div>
+        </el-descriptions-item>
+        <el-descriptions-item label="API密钥">
+          <div class="copy-field">
+            <span class="api-key">{{ detailData.api_key }}</span>
+            <el-button size="small" text @click="copyToClipboard(detailData.api_key)">复制</el-button>
+          </div>
+        </el-descriptions-item>
+        <el-descriptions-item label="公钥">
+          <div class="copy-field">
+            <span class="public-key">{{ detailData.public_key }}</span>
+            <el-button size="small" text @click="copyToClipboard(detailData.public_key)">复制</el-button>
+          </div>
+        </el-descriptions-item>
+      </el-descriptions>
+      <template #footer>
+        <el-button @click="detailVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="dialogVisible" :title="editId ? '编辑节点' : '添加节点'" width="550px">
       <el-form :model="form" :rules="rules" ref="formRef" label-width="110px">
@@ -93,7 +140,8 @@
           <el-input v-model="form.api_url" placeholder="如: http://192.168.1.100:8082" />
         </el-form-item>
         <el-form-item label="API密钥" prop="api_key">
-          <el-input v-model="form.api_key" placeholder="Agent API密钥" />
+          <el-input v-model="form.api_key" :placeholder="editId ? '留空保持不变' : 'Agent API密钥'" />
+          <span v-if="editId" class="form-tip">留空则保持原有密钥不变</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -113,8 +161,10 @@ const loading = ref(false)
 const submitting = ref(false)
 const nodes = ref([])
 const dialogVisible = ref(false)
+const detailVisible = ref(false)
 const editId = ref(null)
 const formRef = ref()
+const detailData = ref({})
 
 const form = reactive({
   name: '',
@@ -135,8 +185,7 @@ const rules = {
   name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
   endpoint: [{ required: true, message: '请输入地址', trigger: 'blur' }],
   address_pool: [{ required: true, message: '请输入地址池', trigger: 'blur' }],
-  api_url: [{ required: true, message: '请输入Agent URL', trigger: 'blur' }],
-  api_key: [{ required: true, message: '请输入API密钥', trigger: 'blur' }]
+  api_url: [{ required: true, message: '请输入Agent URL', trigger: 'blur' }]
 }
 
 async function fetchNodes() {
@@ -147,6 +196,19 @@ async function fetchNodes() {
   } finally {
     loading.value = false
   }
+}
+
+function showDetail(node) {
+  detailData.value = node
+  detailVisible.value = true
+}
+
+function copyToClipboard(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success('已复制到剪贴板')
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
 }
 
 function showDialog(node = null) {
@@ -164,7 +226,7 @@ function showDialog(node = null) {
       default_upload_limit: node.default_upload_limit || 0,
       default_download_limit: node.default_download_limit || 0,
       api_url: node.api_url,
-      api_key: ''
+      api_key: ''  // 显示已有密钥，留空则保持不变
     })
   } else {
     Object.assign(form, {
@@ -190,11 +252,17 @@ async function submitForm() {
     await formRef.value.validate()
     submitting.value = true
 
+    // 如果编辑时API密钥为空，不传递该字段
+    const submitData = { ...form }
+    if (editId.value && !submitData.api_key) {
+      delete submitData.api_key
+    }
+
     if (editId.value) {
-      await api.put(`/api/nodes/${editId.value}`, form)
+      await api.put(`/api/nodes/${editId.value}`, submitData)
       ElMessage.success('更新成功')
     } else {
-      await api.post('/api/nodes', form)
+      await api.post('/api/nodes', submitData)
       ElMessage.success('添加成功')
     }
 
@@ -262,5 +330,17 @@ onMounted(fetchNodes)
   margin-left: 10px;
   color: #909399;
   font-size: 12px;
+}
+
+.copy-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.api-key, .public-key {
+  font-family: monospace;
+  font-size: 12px;
+  word-break: break-all;
 }
 </style>

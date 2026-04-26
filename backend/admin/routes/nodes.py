@@ -82,10 +82,44 @@ async def list_nodes(
             "status": node.status,
             "online": is_online,
             "api_url": node.api_url,
+            "api_key": encryption.decrypt(node.api_key),  # 返回解密后的API密钥
             "created_at": node.created_at
         })
 
     return result
+
+
+@router.get("/{node_id}")
+async def get_node(
+    node_id: int,
+    db: Session = Depends(get_db),
+    current_admin: Admin = Depends(get_current_admin)
+):
+    """获取单个节点详情（包含解密后的API密钥）"""
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    is_online = await check_node_online(node)
+    return {
+        "id": node.id,
+        "name": node.name,
+        "endpoint": node.endpoint,
+        "wg_port": node.wg_port,
+        "wg_interface": node.wg_interface,
+        "public_key": node.public_key,
+        "address_pool": node.address_pool,
+        "dns": node.dns,
+        "mtu": node.mtu,
+        "keepalive": node.keepalive,
+        "default_upload_limit": node.default_upload_limit or 0,
+        "default_download_limit": node.default_download_limit or 0,
+        "status": node.status,
+        "online": is_online,
+        "api_url": node.api_url,
+        "api_key": encryption.decrypt(node.api_key),
+        "created_at": node.created_at
+    }
 
 
 @router.post("", response_model=NodeResponse)
@@ -149,7 +183,7 @@ def update_node(
         if value is not None:
             setattr(node, field, value)
 
-    if data.api_key is not None:
+    if data.api_key is not None and data.api_key != '':
         node.api_key = encryption.encrypt(data.api_key)
 
     db.commit()
