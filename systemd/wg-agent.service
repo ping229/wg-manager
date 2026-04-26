@@ -1,0 +1,16 @@
+[Unit]
+Description=WireGuard Agent Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wg-manager
+Environment="PYTHONPATH=/opt/wg-manager"
+EnvironmentFile=/opt/wg-manager/.env
+ExecStart=/opt/wg-manager/venv/bin/uvicorn backend.agent.main:app --host 127.0.0.1 --port 8082
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  # Portal服务 - 用户门户
+  portal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wg-portal
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./frontend/portal/dist:/app/frontend/portal/dist:ro
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-change-this-encryption-key-32bytes!!}
+      - SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD:-admin123}
+      - DATABASE_URL=sqlite:////app/data/wg.db
+    command: uvicorn backend.portal.main:app --host 0.0.0.0 --port 8080
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Admin服务 - 管理后台
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wg-admin
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data:/app/data
+      - ./frontend/admin/dist:/app/frontend/admin/dist:ro
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-change-this-secret-key}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-change-this-encryption-key-32bytes!!}
+      - SUPER_ADMIN_PASSWORD=${SUPER_ADMIN_PASSWORD:-admin123}
+      - DATABASE_URL=sqlite:////app/data/wg.db
+    command: uvicorn backend.admin.main:app --host 0.0.0.0 --port 8081
+    depends_on:
+      - portal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Agent服务示例 (在VPN节点上部署)
+  # agent:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.agent
+  #   container_name: wg-agent
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8082:8082"
+  #     - "51820:51820/udp"
+  #   volumes:
+  #     - ./data:/app/data
+  #     - /etc/wireguard:/etc/wireguard
+  #   cap_add:
+  #     - NET_ADMIN
+  #     - SYS_MODULE
+  #   environment:
+  #     - ENCRYPTION_KEY=${ENCRYPTION_KEY:-change-this-encryption-key-32bytes!!}
+  #   network_mode: host
+  #   command: uvicorn backend.agent.main:app --host 0.0.0.0 --port 8082
+
+networks:
+  default:
+    name: wg-network

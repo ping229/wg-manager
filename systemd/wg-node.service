@@ -1,0 +1,49 @@
+[Unit]
+Description=WireGuard Node Service (Combined Portal + Admin + Agent)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wg-manager
+Environment="PYTHONPATH=/opt/wg-manager"
+EnvironmentFile=/opt/wg-manager/.env
+ExecStart=/opt/wg-manager/venv/bin/python -c "
+import subprocess
+import os
+
+processes = []
+
+# 启动 Portal
+processes.append(subprocess.Popen([
+    '/opt/wg-manager/venv/bin/uvicorn',
+    'backend.portal.main:app',
+    '--host', '0.0.0.0',
+    '--port', '8080'
+]))
+
+# 启动 Admin
+processes.append(subprocess.Popen([
+    '/opt/wg-manager/venv/bin/uvicorn',
+    'backend.admin.main:app',
+    '--host', '127.0.0.1',
+    '--port', '8081'
+]))
+
+# 启动 Agent
+processes.append(subprocess.Popen([
+    '/opt/wg-manager/venv/bin/uvicorn',
+    'backend.agent.main:app',
+    '--host', '127.0.0.1',
+    '--port', '8082'
+]))
+
+# 等待任意进程结束
+for p in processes:
+    p.wait()
+"
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
