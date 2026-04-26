@@ -94,6 +94,25 @@ systemctl start wg-agent
 systemctl enable wg-agent
 ```
 
+**步骤5：查看 Agent API 密钥**
+
+Agent 部署完成后，需要获取 API 密钥才能在管理后台添加节点。
+
+```bash
+# 在 Agent 节点服务器上执行
+grep ENCRYPTION_KEY /opt/wg-manager/.env
+```
+
+输出示例：
+```
+ENCRYPTION_KEY=0a0d4981feb3f2bf7a029c274b8b80c2
+```
+
+这个 `ENCRYPTION_KEY` 就是 Agent 的 API 密钥。
+
+> **忘记密钥怎么办？**
+> 在 Agent 节点服务器上执行 `grep ENCRYPTION_KEY /opt/wg-manager/.env` 即可查看。
+
 ### 1.3 在管理后台添加节点
 
 登录管理后台 → 节点管理 → 添加节点
@@ -214,6 +233,16 @@ cp /opt/wg-manager/data/wg.db /backup/wg_$(date +%Y%m%d).db
 # 备份配置
 cp /opt/wg-manager/.env /backup/
 ```
+
+### Q5: 忘记 Agent API 密钥怎么办？
+
+在 Agent 节点服务器上执行：
+
+```bash
+grep ENCRYPTION_KEY /opt/wg-manager/.env
+```
+
+输出的 `ENCRYPTION_KEY` 就是 Agent 的 API 密钥。在 Admin 管理后台的节点详情页也可以查看已配置的密钥。
 
 ## 六、服务管理命令
 

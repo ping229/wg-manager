@@ -192,7 +192,24 @@ sudo bash install.sh --agent
 sudo bash deploy.sh node-name wg0 51820 10.100.0.0/24
 ```
 
-### 2. 在管理后台添加节点
+### 2. 查看 Agent API 密钥
+
+Agent 部署完成后，需要在管理后台配置 API 密钥才能连接。
+
+**查看方法：在 Agent 节点服务器上执行**
+
+```bash
+grep ENCRYPTION_KEY /opt/wg-manager/.env
+```
+
+输出示例：
+```
+ENCRYPTION_KEY=0a0d4981feb3f2bf7a029c274b8b80c2
+```
+
+这个 `ENCRYPTION_KEY` 就是 Agent 的 API 密钥，需要在 Admin 管理后台添加节点时填入。
+
+### 3. 在管理后台添加节点
 
 1. 登录管理后台 `http://admin-ip:8081`
 2. 进入「节点管理」
