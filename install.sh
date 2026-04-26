@@ -54,9 +54,11 @@ check_dependencies() {
         missing+=("python3-pip")
     fi
 
-    # 检查 WireGuard
-    if ! command -v wg &> /dev/null; then
-        missing+=("wireguard-tools")
+    # 检查 WireGuard (仅 agent 和 all 模式需要)
+    if [[ $DEPLOY_MODE == "agent" || $DEPLOY_MODE == "all" ]]; then
+        if ! command -v wg &> /dev/null; then
+            missing+=("wireguard-tools")
+        fi
     fi
 
     # 检查 Node.js (用于前端构建)
@@ -112,21 +114,24 @@ build_frontend() {
 
     log_info "构建前端..."
 
-    # 构建 Admin 前端
-    cd $INSTALL_DIR/frontend/admin
-    if [[ ! -d "node_modules" ]]; then
-        npm install
+    # 根据部署模式构建对应前端
+    if [[ $DEPLOY_MODE == "portal" || $DEPLOY_MODE == "all" ]]; then
+        cd $INSTALL_DIR/frontend/portal
+        if [[ ! -d "node_modules" ]]; then
+            npm install
+        fi
+        npm run build
+        log_info "Portal 前端构建完成"
     fi
-    npm run build
-    log_info "Admin 前端构建完成"
 
-    # 构建 Portal 前端
-    cd $INSTALL_DIR/frontend/portal
-    if [[ ! -d "node_modules" ]]; then
-        npm install
+    if [[ $DEPLOY_MODE == "admin" || $DEPLOY_MODE == "all" ]]; then
+        cd $INSTALL_DIR/frontend/admin
+        if [[ ! -d "node_modules" ]]; then
+            npm install
+        fi
+        npm run build
+        log_info "Admin 前端构建完成"
     fi
-    npm run build
-    log_info "Portal 前端构建完成"
 
     cd $INSTALL_DIR
 }
@@ -138,10 +143,14 @@ create_directories() {
     mkdir -p $INSTALL_DIR/data
     mkdir -p $INSTALL_DIR/data/logs
     mkdir -p $INSTALL_DIR/data/configs
-    mkdir -p /etc/wireguard
+
+    # WireGuard 配置目录 (仅 agent 和 all 模式)
+    if [[ $DEPLOY_MODE == "agent" || $DEPLOY_MODE == "all" ]]; then
+        mkdir -p /etc/wireguard
+        chmod 700 /etc/wireguard
+    fi
 
     chmod 700 $INSTALL_DIR/data
-    chmod 700 /etc/wireguard
 }
 
 # 生成配置文件
@@ -162,6 +171,7 @@ generate_config() {
     cat > "$env_file" << EOF
 # WireGuard 管理系统配置文件
 # 生成时间: $(date)
+# 部署模式: $DEPLOY_MODE
 
 # JWT 密钥 (请妥善保管)
 SECRET_KEY=${secret_key}
@@ -179,11 +189,17 @@ DATABASE_URL=sqlite:///${INSTALL_DIR}/data/wg.db
 PORTAL_PORT=8080
 ADMIN_PORT=8081
 AGENT_PORT=8082
+
+# Admin管理后台地址 (Portal独立部署时需要配置)
+ADMIN_URL=http://127.0.0.1:8081
 EOF
 
     chmod 600 "$env_file"
     log_info "配置文件已生成: $env_file"
-    log_warn "请修改 SUPER_ADMIN_PASSWORD 为安全密码!"
+
+    if [[ $DEPLOY_MODE == "portal" ]]; then
+        log_warn "Portal 独立部署: 请修改 ADMIN_URL 为实际的 Admin 后台地址!"
+    fi
 }
 
 # 安装 systemd 服务
@@ -192,35 +208,44 @@ install_systemd_services() {
 
     local systemd_dir="/etc/systemd/system"
 
-    # 根据部署模式选择服务
-    if [[ $DEPLOY_MODE == "central" ]]; then
-        # 中央服务器模式：只安装 Portal 和 Admin
-        cp $INSTALL_DIR/systemd/wg-portal.service $systemd_dir/
-        cp $INSTALL_DIR/systemd/wg-admin.service $systemd_dir/
-        systemctl daemon-reload
-        systemctl enable wg-portal wg-admin
-        log_info "已安装服务: wg-portal, wg-admin"
-
-    elif [[ $DEPLOY_MODE == "agent" ]]; then
-        # Agent 模式：只安装 Agent
-        cp $INSTALL_DIR/systemd/wg-agent.service $systemd_dir/
-        systemctl daemon-reload
-        systemctl enable wg-agent
-        log_info "已安装服务: wg-agent"
-
-    else
-        # 单机模式：安装所有服务
-        cp $INSTALL_DIR/systemd/wg-portal.service $systemd_dir/
-        cp $INSTALL_DIR/systemd/wg-admin.service $systemd_dir/
-        cp $INSTALL_DIR/systemd/wg-agent.service $systemd_dir/
-        systemctl daemon-reload
-        systemctl enable wg-portal wg-admin wg-agent
-        log_info "已安装服务: wg-portal, wg-admin, wg-agent"
-    fi
+    case $DEPLOY_MODE in
+        portal)
+            cp $INSTALL_DIR/systemd/wg-portal.service $systemd_dir/
+            systemctl daemon-reload
+            systemctl enable wg-portal
+            log_info "已安装服务: wg-portal"
+            ;;
+        admin)
+            cp $INSTALL_DIR/systemd/wg-admin.service $systemd_dir/
+            systemctl daemon-reload
+            systemctl enable wg-admin
+            log_info "已安装服务: wg-admin"
+            ;;
+        agent)
+            cp $INSTALL_DIR/systemd/wg-agent.service $systemd_dir/
+            systemctl daemon-reload
+            systemctl enable wg-agent
+            log_info "已安装服务: wg-agent"
+            ;;
+        all)
+            cp $INSTALL_DIR/systemd/wg-portal.service $systemd_dir/
+            cp $INSTALL_DIR/systemd/wg-admin.service $systemd_dir/
+            cp $INSTALL_DIR/systemd/wg-agent.service $systemd_dir/
+            systemctl daemon-reload
+            systemctl enable wg-portal wg-admin wg-agent
+            log_info "已安装服务: wg-portal, wg-admin, wg-agent"
+            ;;
+    esac
 }
 
 # 初始化数据库
 init_database() {
+    # 仅 portal、admin、all 模式需要初始化数据库
+    if [[ $DEPLOY_MODE == "agent" ]]; then
+        log_info "Agent 模式不需要初始化数据库，跳过"
+        return
+    fi
+
     log_info "初始化数据库..."
 
     cd $INSTALL_DIR
@@ -243,17 +268,32 @@ EOF
 configure_firewall() {
     log_info "配置防火墙..."
 
+    local ports=()
+
+    case $DEPLOY_MODE in
+        portal)
+            ports+=("8080/tcp" "WireGuard Portal")
+            ;;
+        admin)
+            ports+=("8081/tcp" "WireGuard Admin")
+            ;;
+        agent)
+            ports+=("8082/tcp" "WireGuard Agent" "51820/udp" "WireGuard VPN")
+            ;;
+        all)
+            ports+=("8080/tcp" "WireGuard Portal" "8081/tcp" "WireGuard Admin" "8082/tcp" "WireGuard Agent" "51820/udp" "WireGuard VPN")
+            ;;
+    esac
+
     if command -v ufw &> /dev/null; then
-        ufw allow 8080/tcp comment 'WireGuard Portal'
-        ufw allow 8081/tcp comment 'WireGuard Admin'
-        ufw allow 8082/tcp comment 'WireGuard Agent'
-        ufw allow 51820/udp comment 'WireGuard VPN'
+        for ((i=0; i<${#ports[@]}; i+=2)); do
+            ufw allow ${ports[i]} comment "${ports[i+1]}"
+        done
         log_info "UFW 防火墙规则已添加"
     elif command -v firewall-cmd &> /dev/null; then
-        firewall-cmd --permanent --add-port=8080/tcp
-        firewall-cmd --permanent --add-port=8081/tcp
-        firewall-cmd --permanent --add-port=8082/tcp
-        firewall-cmd --permanent --add-port=51820/udp
+        for ((i=0; i<${#ports[@]}; i+=2)); do
+            firewall-cmd --permanent --add-port=${ports[i]}
+        done
         firewall-cmd --reload
         log_info "Firewalld 防火墙规则已添加"
     else
@@ -268,22 +308,60 @@ show_result() {
     echo "  WireGuard 管理系统安装完成!"
     echo "=========================================="
     echo ""
+    echo "部署模式: $DEPLOY_MODE"
     echo "安装目录: $INSTALL_DIR"
     echo ""
-    echo "服务端口:"
-    echo "  - Portal (用户门户): http://0.0.0.0:8080"
-    echo "  - Admin (管理后台):  http://127.0.0.1:8081"
-    echo "  - Agent (节点代理):  http://127.0.0.1:8082"
-    echo ""
-    echo "默认管理员账号:"
-    echo "  - 用户名: admin"
-    echo "  - 密码: admin123 (请立即修改!)"
-    echo ""
-    echo "启动服务:"
-    echo "  systemctl start wg-portal wg-admin"
+
+    case $DEPLOY_MODE in
+        portal)
+            echo "已安装服务:"
+            echo "  - Portal (用户门户): http://0.0.0.0:8080"
+            echo ""
+            echo "启动服务:"
+            echo "  systemctl start wg-portal"
+            echo ""
+            echo "重要提示:"
+            echo "  请修改 .env 中的 ADMIN_URL 为实际的 Admin 后台地址!"
+            ;;
+        admin)
+            echo "已安装服务:"
+            echo "  - Admin (管理后台): http://127.0.0.1:8081"
+            echo ""
+            echo "启动服务:"
+            echo "  systemctl start wg-admin"
+            echo ""
+            echo "默认管理员账号:"
+            echo "  - 用户名: admin"
+            echo "  - 密码: admin123 (请立即修改!)"
+            ;;
+        agent)
+            echo "已安装服务:"
+            echo "  - Agent (节点代理): http://127.0.0.1:8082"
+            echo ""
+            echo "启动服务:"
+            echo "  systemctl start wg-agent"
+            echo ""
+            echo "提示:"
+            echo "  Agent 需要在 Admin 管理后台注册后才能使用"
+            ;;
+        all)
+            echo "已安装服务:"
+            echo "  - Portal (用户门户): http://0.0.0.0:8080"
+            echo "  - Admin (管理后台):  http://127.0.0.1:8081"
+            echo "  - Agent (节点代理):  http://127.0.0.1:8082"
+            echo ""
+            echo "默认管理员账号:"
+            echo "  - 用户名: admin"
+            echo "  - 密码: admin123 (请立即修改!)"
+            echo ""
+            echo "启动服务:"
+            echo "  systemctl start wg-portal wg-admin wg-agent"
+            ;;
+    esac
+
     echo ""
     echo "查看日志:"
-    echo "  journalctl -u wg-portal -f"
+    echo "  journalctl -u wg-$DEPLOY_MODE -f"
     echo ""
     echo "配置文件: $INSTALL_DIR/.env"
     echo ""
@@ -299,13 +377,17 @@ main() {
     echo ""
 
     # 解析参数
-    DEPLOY_MODE="all"  # all, central, agent
+    DEPLOY_MODE="all"  # portal, admin, agent, all
     SKIP_FRONTEND=0
 
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --central)
-                DEPLOY_MODE="central"
+            --portal)
+                DEPLOY_MODE="portal"
+                shift
+                ;;
+            --admin)
+                DEPLOY_MODE="admin"
                 shift
                 ;;
             --agent)
@@ -320,10 +402,17 @@ main() {
                 echo "用法: $0 [选项]"
                 echo ""
                 echo "选项:"
-                echo "  --central        仅安装中央服务器 (Portal + Admin)"
-                echo "  --agent          仅安装节点代理 (Agent)"
+                echo "  --portal         仅安装 Portal (用户门户)"
+                echo "  --admin          仅安装 Admin (管理后台)"
+                echo "  --agent          仅安装 Agent (节点代理)"
                 echo "  --skip-frontend  跳过前端构建"
                 echo "  --help           显示帮助信息"
+                echo ""
+                echo "示例:"
+                echo "  $0                  # 单机模式，安装所有服务"
+                echo "  $0 --portal         # 仅安装 Portal"
+                echo "  $0 --admin          # 仅安装 Admin"
+                echo "  $0 --agent          # 仅安装 Agent"
                 exit 0
                 ;;
             *)

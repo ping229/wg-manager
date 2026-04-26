@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # Admin服务配置
     ADMIN_HOST: str = "127.0.0.1"
     ADMIN_PORT: int = 8081
+    ADMIN_URL: str = "http://127.0.0.1:8081"  # Admin管理后台地址，Portal可跳转
 
     # Agent服务配置
     AGENT_HOST: str = "127.0.0.1"
