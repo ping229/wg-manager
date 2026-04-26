@@ -6,13 +6,9 @@
 
 import sqlite3
 import os
-import sys
 
-sys.path.insert(0, '/opt/wg-manager')
-
-from backend.shared.config import settings
-
-DB_PATH = settings.DATABASE_URL.replace('sqlite:///', '')
+# 默认数据库路径
+DB_PATH = '/opt/wg-manager/data/wg.db'
 
 
 def migrate():
