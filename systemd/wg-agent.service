@@ -8,7 +8,7 @@ User=root
 WorkingDirectory=/opt/wg-manager
 Environment="PYTHONPATH=/opt/wg-manager"
 EnvironmentFile=/opt/wg-manager/.env
-ExecStart=/opt/wg-manager/venv/bin/uvicorn backend.agent.main:app --host ${AGENT_HOST:-127.0.0.1} --port ${AGENT_PORT:-8082}
+ExecStart=/opt/wg-manager/venv/bin/uvicorn backend.agent.main:app --host ${AGENT_HOST} --port ${AGENT_PORT}
 Restart=always
 RestartSec=5
 
