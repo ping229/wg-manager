@@ -14,22 +14,26 @@ class NftablesManager:
     def _run_nft(self, command: str) -> bool:
         """执行nft命令"""
         try:
-            subprocess.run(
+            result = subprocess.run(
                 f"nft {command}",
                 shell=True,
                 check=True,
-                capture_output=True
+                capture_output=True,
+                text=True
             )
             return True
         except subprocess.CalledProcessError as e:
-            print(f"nft命令执行失败: {e}")
+            print(f"nft命令执行失败: {e.stderr.strip()}")
             return False
 
     def init_table(self) -> bool:
         """初始化nftables表"""
+        # 先删除已存在的表（如果有）
+        self._run_nft(f"delete table inet {self.TABLE_NAME}")
+
         commands = [
             f"add table inet {self.TABLE_NAME}",
-            f"add chain inet {self.TABLE_NAME} {self.CHAIN_NAME} {{ type filter hook forward priority 0 ; }}",
+            f"add chain inet {self.TABLE_NAME} {self.CHAIN_NAME} '{{ type filter hook forward priority 0 ; }}'",
         ]
         for cmd in commands:
             if not self._run_nft(cmd):

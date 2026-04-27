@@ -31,8 +31,8 @@ class TcManager:
         # 删除旧的qdisc
         self._run_tc(f"qdisc del dev {self.interface} root 2>/dev/null")
 
-        # 创建HTB qdisc
-        if not self._run_tc(f"qdisc add dev {self.interface} root handle {self.DEFAULT_HANDLE} htb default 999"):
+        # 创建HTB qdisc，default 0表示未分类流量直接发送（不限速）
+        if not self._run_tc(f"qdisc add dev {self.interface} root handle {self.DEFAULT_HANDLE} htb default 0"):
             return False
 
         # 创建根类
@@ -42,7 +42,7 @@ class TcManager:
 
     def add_class(self, class_id: int, rate_mbps: int, ceil_mbps: Optional[int] = None) -> bool:
         """
-        添加限速类
+        添加限速类（如果已存在则更新）
         class_id: 类ID (1-999)
         rate_mbps: 保证速率(Mbps)
         ceil_mbps: 最大速率(Mbps),默认等于保证速率
@@ -54,6 +54,14 @@ class TcManager:
         rate = f"{rate_mbps}mbit"
         ceil = f"{ceil_mbps}mbit"
 
+        # 先尝试修改已存在的类
+        result = self._run_tc(
+            f"class change dev {self.interface} parent {self.ROOT_CLASS} classid {classid} htb rate {rate} ceil {ceil}"
+        )
+        if result:
+            return True
+
+        # 如果修改失败，尝试添加新类
         return self._run_tc(
             f"class add dev {self.interface} parent {self.ROOT_CLASS} classid {classid} htb rate {rate} ceil {ceil}"
         )
@@ -78,6 +86,11 @@ class TcManager:
 
     def add_filter(self, class_id: int, mark: int) -> bool:
         """添加过滤器,将标记的流量路由到指定类"""
+        # 先删除可能存在的旧过滤器
+        self._run_tc(
+            f"filter del dev {self.interface} parent {self.DEFAULT_HANDLE} protocol ip handle {mark} fw"
+        )
+        # 添加新过滤器
         return self._run_tc(
             f"filter add dev {self.interface} parent {self.DEFAULT_HANDLE} protocol ip handle {mark} fw classid 1:{class_id}"
         )

@@ -6,8 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from backend.shared.config import settings, ensure_directories
-from backend.shared.database import init_db
+from backend.portal.config import settings, ensure_directories
+from backend.portal.database import init_db
 from backend.portal.routes import auth, nodes, config
 
 # 确保目录存在
@@ -44,31 +44,6 @@ if FRONTEND_DIST.exists():
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)
         return FileResponse(FRONTEND_DIST / "index.html")
-
-
-@app.on_event("startup")
-async def startup_event():
-    """启动时创建默认超级管理员"""
-    from backend.shared.database import SessionLocal
-    from backend.shared.models import Admin
-    from backend.shared.auth import get_password_hash
-
-    db = SessionLocal()
-    try:
-        # 检查是否存在超级管理员
-        if not db.query(Admin).filter(Admin.role == "super_admin").first():
-            # 限制密码长度避免 bcrypt 报错
-            password = settings.SUPER_ADMIN_PASSWORD[:72] if len(settings.SUPER_ADMIN_PASSWORD) > 72 else settings.SUPER_ADMIN_PASSWORD
-            admin = Admin(
-                username="admin",
-                password_hash=get_password_hash(password),
-                role="super_admin"
-            )
-            db.add(admin)
-            db.commit()
-            print(f"Created default super admin: admin / {password}")
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":

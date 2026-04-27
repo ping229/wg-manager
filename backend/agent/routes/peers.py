@@ -23,8 +23,8 @@ traffic_service = TrafficControlService()
 
 def verify_api_key(x_api_key: str = Header(None)):
     """验证API密钥"""
-    # 从环境变量或配置中获取有效密钥
-    valid_key = settings.ENCRYPTION_KEY  # 实际使用时应该从配置中读取
+    # 优先使用 AGENT_API_KEY，为空时使用 ENCRYPTION_KEY
+    valid_key = settings.AGENT_API_KEY or settings.ENCRYPTION_KEY
     if not x_api_key or x_api_key != valid_key:
         raise HTTPException(status_code=401, detail="无效的API密钥")
     return True
@@ -76,11 +76,12 @@ def set_peer_limit(
     authorized: bool = Depends(verify_api_key)
 ):
     """设置Peer限速"""
-    if not traffic_service.set_peer_limit(
+    success, error = traffic_service.set_peer_limit(
         data.address,
         data.upload_limit,
         data.download_limit
-    ):
-        raise HTTPException(status_code=500, detail="设置限速失败")
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail=f"设置限速失败: {error}")
 
     return {"success": True, "message": "限速已设置"}

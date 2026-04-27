@@ -4,7 +4,7 @@ sys.path.insert(0, '/opt/wg-manager')
 from fastapi import FastAPI, Depends, HTTPException, Header
 
 from backend.shared.config import settings, ensure_directories
-from backend.agent.routes.peers import router as peer_router, wg_service, traffic_service
+from backend.agent.routes.peers import router as peer_router, wg_service, traffic_service, verify_api_key
 
 # 确保目录存在
 ensure_directories()
@@ -17,14 +17,6 @@ app = FastAPI(
 
 # 注册路由
 app.include_router(peer_router)
-
-
-def verify_api_key(x_api_key: str = Header(None)):
-    """验证API密钥"""
-    valid_key = settings.ENCRYPTION_KEY
-    if not x_api_key or x_api_key != valid_key:
-        raise HTTPException(status_code=401, detail="无效的API密钥")
-    return True
 
 
 @app.get("/api/status")

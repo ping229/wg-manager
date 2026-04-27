@@ -1,13 +1,14 @@
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from typing import Optional
 
 import sys
 sys.path.insert(0, '/opt/wg-manager')
 
-from backend.shared.database import get_db
-from backend.shared.models import User, Registration
+from backend.portal.database import get_db
+from backend.portal.models import User, Registration
 from backend.shared.schemas import UserRegister, UserLogin, UserResponse, PasswordChange, Token
 from backend.shared.auth import (
     verify_password,
@@ -15,7 +16,7 @@ from backend.shared.auth import (
     create_access_token,
     get_current_user
 )
-from backend.shared.config import settings
+from backend.portal.config import settings
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 
@@ -63,7 +64,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         )
 
     if user.status != "active":
-        raise HTTPException(status_code=403, detail="账户已被禁用")
+        raise HTTPException(status_code=403, detail="账户未审核或已被禁用")
 
     access_token = create_access_token(
         data={"user_id": user.id, "is_admin": False}
@@ -119,3 +120,151 @@ def get_registration_status(
         "status": registration.status,
         "reject_reason": registration.reject_reason
     }
+
+
+# ============ Admin API - 供 Admin 调用 ============
+
+def verify_admin_api_key(api_key: Optional[str] = Header(None, alias="X-Admin-API-Key")):
+    """验证 Admin API 密钥"""
+    if not settings.PORTAL_API_KEY:
+        raise HTTPException(status_code=500, detail="Portal API 密钥未配置")
+    if api_key != settings.PORTAL_API_KEY:
+        raise HTTPException(status_code=403, detail="无效的 API 密钥")
+    return True
+
+
+@router.get("/admin/users")
+def admin_list_users(
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 获取用户列表"""
+    users = db.query(User).all()
+    return [{
+        "id": u.id,
+        "username": u.username,
+        "email": u.email,
+        "status": u.status,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+        "approved_at": u.approved_at.isoformat() if u.approved_at else None
+    } for u in users]
+
+
+@router.get("/admin/registrations")
+def admin_list_registrations(
+    status_filter: str = None,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 获取注册申请列表"""
+    query = db.query(Registration)
+    if status_filter:
+        query = query.filter(Registration.status == status_filter)
+    registrations = query.order_by(Registration.created_at.desc()).all()
+    return [{
+        "id": r.id,
+        "username": r.username,
+        "email": r.email,
+        "status": r.status,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "reject_reason": r.reject_reason
+    } for r in registrations]
+
+
+@router.post("/admin/approve/{reg_id}")
+def admin_approve_registration(
+    reg_id: int,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 批准注册申请"""
+    registration = db.query(Registration).filter(Registration.id == reg_id).first()
+    if not registration:
+        raise HTTPException(status_code=404, detail="注册申请不存在")
+
+    if registration.status != "pending":
+        raise HTTPException(status_code=400, detail="该申请已处理")
+
+    # 创建用户
+    user = User(
+        username=registration.username,
+        password_hash=registration.password_hash,
+        email=registration.email,
+        status="active",
+        approved_at=datetime.utcnow()
+    )
+    db.add(user)
+
+    # 更新注册状态
+    registration.status = "approved"
+    registration.reviewed_at = datetime.utcnow()
+
+    db.commit()
+
+    return {"message": "用户已批准", "user_id": user.id}
+
+
+@router.post("/admin/reject/{reg_id}")
+def admin_reject_registration(
+    reg_id: int,
+    reason: str = "",
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 拒绝注册申请"""
+    registration = db.query(Registration).filter(Registration.id == reg_id).first()
+    if not registration:
+        raise HTTPException(status_code=404, detail="注册申请不存在")
+
+    if registration.status != "pending":
+        raise HTTPException(status_code=400, detail="该申请已处理")
+
+    registration.status = "rejected"
+    registration.reviewed_at = datetime.utcnow()
+    registration.reject_reason = reason
+
+    db.commit()
+
+    return {"message": "已拒绝注册申请"}
+
+
+@router.get("/admin/user/{user_id}")
+def admin_get_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 获取用户详情"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "status": user.status,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "approved_at": user.approved_at.isoformat() if user.approved_at else None
+    }
+
+
+@router.put("/admin/user/{user_id}/status")
+def admin_update_user_status(
+    user_id: int,
+    status: str,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 更新用户状态"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    if status not in ["active", "disabled"]:
+        raise HTTPException(status_code=400, detail="无效的状态")
+
+    user.status = status
+    db.commit()
+
+    return {"message": f"用户状态已更新为 {status}"}

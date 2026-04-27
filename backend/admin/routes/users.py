@@ -1,225 +1,167 @@
-import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 
 import sys
 sys.path.insert(0, '/opt/wg-manager')
 
-from backend.shared.database import get_db
-from backend.shared.models import User, Peer, Node, Admin
-from backend.shared.schemas import UserResponse, UserUpdate
-from backend.shared.auth import get_current_admin, get_password_hash, encryption
+from backend.admin.database import get_db
+from backend.admin.models import AdminUser, Peer, Node
+from backend.shared.auth import get_current_admin
+from backend.admin.services.portal_client import portal_client
 
 router = APIRouter(prefix="/api/users", tags=["用户管理"])
 
 
-async def remove_peer_from_agent(node: Node, public_key: str):
-    """从Agent删除Peer"""
-    async with httpx.AsyncClient() as client:
-        try:
-            await client.post(
-                f"{node.api_url.rstrip('/')}/api/peer/remove",
-                json={"public_key": public_key},
-                headers={"X-API-Key": encryption.decrypt(node.api_key)},
-                timeout=10.0
-            )
-        except Exception:
-            pass
-
-
 @router.get("")
-def list_users(
+async def list_users(
     status: str = None,
-    db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """获取用户列表"""
-    query = db.query(User)
-    if status:
-        query = query.filter(User.status == status)
-    users = query.all()
+    try:
+        users = await portal_client.get_users()
 
-    result = []
-    for user in users:
-        # 查找用户的Peer信息
-        peer = db.query(Peer).filter(Peer.user_id == user.id).first()
-        peer_info = None
+        # 获取所有 Peer 信息
+        db = next(get_db())
+        for user in users:
+            peer = db.query(Peer).filter(Peer.portal_user_id == user["id"]).first()
+            if peer:
+                node = db.query(Node).filter(Node.id == peer.node_id).first()
+                user["peer"] = {
+                    "id": peer.id,
+                    "node_id": peer.node_id,
+                    "node_name": node.name if node else None,
+                    "address": peer.address,
+                    "created_at": peer.created_at.isoformat() if peer.created_at else None
+                }
+            else:
+                user["peer"] = None
+
+        # 按状态过滤
+        if status:
+            users = [u for u in users if u["status"] == status]
+
+        return users
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{user_id}")
+async def get_user(
+    user_id: int,
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """获取用户详情"""
+    try:
+        user = await portal_client.get_user(user_id)
+
+        # 获取 Peer 信息
+        db = next(get_db())
+        peer = db.query(Peer).filter(Peer.portal_user_id == user_id).first()
         if peer:
             node = db.query(Node).filter(Node.id == peer.node_id).first()
-            peer_info = {
+            user["peer"] = {
                 "id": peer.id,
                 "node_id": peer.node_id,
                 "node_name": node.name if node else None,
                 "address": peer.address,
-                "created_at": peer.created_at
+                "created_at": peer.created_at.isoformat() if peer.created_at else None
             }
+        else:
+            user["peer"] = None
 
-        result.append({
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "status": user.status,
-            "created_at": user.created_at,
-            "approved_at": user.approved_at,
-            "peer": peer_info
-        })
-
-    return result
-
-
-@router.get("/{user_id}")
-def get_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
-):
-    """获取用户详情"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    # 查找用户的Peer信息
-    peer = db.query(Peer).filter(Peer.user_id == user.id).first()
-    peer_info = None
-    if peer:
-        node = db.query(Node).filter(Node.id == peer.node_id).first()
-        peer_info = {
-            "id": peer.id,
-            "node_id": peer.node_id,
-            "node_name": node.name if node else None,
-            "address": peer.address,
-            "created_at": peer.created_at
-        }
-
-    return {
-        "id": user.id,
-        "username": user.username,
-        "email": user.email,
-        "status": user.status,
-        "created_at": user.created_at,
-        "approved_at": user.approved_at,
-        "peer": peer_info
-    }
-
-
-@router.put("/{user_id}")
-def update_user(
-    user_id: int,
-    data: UserUpdate,
-    db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
-):
-    """更新用户"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    if data.email is not None:
-        existing = db.query(User).filter(User.email == data.email, User.id != user_id).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="邮箱已被使用")
-        user.email = data.email
-
-    if data.password is not None:
-        user.password_hash = get_password_hash(data.password)
-
-    db.commit()
-    db.refresh(user)
-
-    return {"message": "用户已更新", "user": UserResponse.model_validate(user)}
+        return user
+    except Exception as e:
+        if "不存在" in str(e):
+            raise HTTPException(status_code=404, detail="用户不存在")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{user_id}/disable")
 async def disable_user(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """禁用用户"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
+    import httpx
+    from backend.admin.config import settings
+    from backend.shared.auth import encryption
 
-    if user.status == "disabled":
-        raise HTTPException(status_code=400, detail="用户已被禁用")
+    try:
+        # 获取用户信息
+        user = await portal_client.get_user(user_id)
 
-    # 删除用户的所有Peer
-    peers = db.query(Peer).filter(Peer.user_id == user_id).all()
-    for peer in peers:
-        node = db.query(Node).filter(Node.id == peer.node_id).first()
-        if node:
-            await remove_peer_from_agent(node, peer.public_key)
-        db.delete(peer)
+        # 更新用户状态
+        await portal_client.update_user_status(user_id, "disabled")
 
-    user.status = "disabled"
-    db.commit()
+        # 删除用户的所有 Peer
+        db = next(get_db())
+        peers = db.query(Peer).filter(Peer.portal_user_id == user_id).all()
 
-    return {"message": "用户已禁用,所有Peer已清空"}
+        for peer in peers:
+            node = db.query(Node).filter(Node.id == peer.node_id).first()
+            if node:
+                # 从 Agent 删除 Peer
+                try:
+                    async with httpx.AsyncClient() as client:
+                        await client.post(
+                            f"{node.api_url.rstrip('/')}/api/peer/remove",
+                            json={"public_key": peer.public_key},
+                            headers={"X-API-Key": encryption.decrypt(node.api_key)},
+                            timeout=10.0
+                        )
+                except Exception:
+                    pass
+            db.delete(peer)
+
+        db.commit()
+
+        return {"message": "用户已禁用，所有 Peer 已清空"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{user_id}/enable")
-def enable_user(
+async def enable_user(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """启用用户"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    if user.status == "active":
-        raise HTTPException(status_code=400, detail="用户已处于启用状态")
-
-    user.status = "active"
-    db.commit()
-
-    return {"message": "用户已启用"}
-
-
-@router.delete("/{user_id}")
-def delete_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
-):
-    """删除用户"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
-
-    # 检查是否有Peer
-    peer = db.query(Peer).filter(Peer.user_id == user_id).first()
-    if peer:
-        raise HTTPException(status_code=400, detail="请先禁用用户以清空Peer")
-
-    db.delete(user)
-    db.commit()
-
-    return {"message": "用户已删除"}
+    try:
+        await portal_client.update_user_status(user_id, "active")
+        return {"message": "用户已启用"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{user_id}/peer")
 async def delete_user_peer(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
-    """删除用户的Peer配置"""
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
+    """删除用户的 Peer 配置"""
+    import httpx
+    from backend.shared.auth import encryption
 
-    peer = db.query(Peer).filter(Peer.user_id == user_id).first()
+    db = next(get_db())
+    peer = db.query(Peer).filter(Peer.portal_user_id == user_id).first()
     if not peer:
-        raise HTTPException(status_code=404, detail="该用户没有Peer配置")
+        raise HTTPException(status_code=404, detail="该用户没有 Peer 配置")
 
-    # 从Agent删除Peer
+    # 从 Agent 删除 Peer
     node = db.query(Node).filter(Node.id == peer.node_id).first()
     if node:
-        await remove_peer_from_agent(node, peer.public_key)
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"{node.api_url.rstrip('/')}/api/peer/remove",
+                    json={"public_key": peer.public_key},
+                    headers={"X-API-Key": encryption.decrypt(node.api_key)},
+                    timeout=10.0
+                )
+        except Exception:
+            pass
 
     db.delete(peer)
     db.commit()
 
-    return {"message": "Peer配置已删除"}
+    return {"message": "Peer 配置已删除"}

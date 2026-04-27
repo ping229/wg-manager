@@ -6,12 +6,6 @@ from passlib.context import CryptContext
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
-from .config import settings
-from .database import get_db
-from .models import User, Admin
-from .schemas import TokenData
-
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
@@ -32,36 +26,36 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, secret_key: str, algorithm: str = "HS256",
+                        expires_minutes: int = 1440) -> str:
     """创建JWT令牌"""
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.utcnow() + timedelta(minutes=expires_minutes)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, secret_key, algorithm=algorithm)
     return encoded_jwt
 
 
-def decode_token(token: str) -> Optional[TokenData]:
+def decode_token(token: str, secret_key: str, algorithm: str = "HS256") -> Optional[dict]:
     """解码JWT令牌"""
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, secret_key, algorithms=[algorithm])
         user_id: int = payload.get("user_id")
         is_admin: bool = payload.get("is_admin", False)
         if user_id is None:
             return None
-        return TokenData(user_id=user_id, is_admin=is_admin)
+        return {"user_id": user_id, "is_admin": is_admin}
     except JWTError:
         return None
 
 
-async def get_current_user(
-    token: Optional[str] = Depends(oauth2_scheme_user),
-    db: Session = Depends(get_db)
-) -> User:
-    """获取当前登录用户"""
+# ============ Portal 用户认证 ============
+async def get_current_user(token: Optional[str] = Depends(oauth2_scheme_user)):
+    """获取当前登录用户 - Portal"""
+    from backend.portal.database import get_db, SessionLocal
+    from backend.portal.models import User
+    from backend.portal.config import settings
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="无法验证凭据",
@@ -70,25 +64,31 @@ async def get_current_user(
     if token is None:
         raise credentials_exception
 
-    token_data = decode_token(token)
-    if token_data is None or token_data.is_admin:
+    token_data = decode_token(token, settings.SECRET_KEY, settings.ALGORITHM)
+    if token_data is None or token_data.get("is_admin"):
         raise credentials_exception
 
-    user = db.query(User).filter(User.id == token_data.user_id).first()
-    if user is None:
-        raise credentials_exception
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == token_data["user_id"]).first()
+        if user is None:
+            raise credentials_exception
 
-    if user.status != "active":
-        raise HTTPException(status_code=403, detail="账户已被禁用")
+        if user.status != "active":
+            raise HTTPException(status_code=403, detail="账户未审核或已被禁用")
 
-    return user
+        return user
+    finally:
+        db.close()
 
 
-async def get_current_admin(
-    token: Optional[str] = Depends(oauth2_scheme_admin),
-    db: Session = Depends(get_db)
-) -> Admin:
-    """获取当前登录管理员"""
+# ============ Admin 管理员认证 ============
+async def get_current_admin(token: Optional[str] = Depends(oauth2_scheme_admin)):
+    """获取当前登录管理员 - Admin"""
+    from backend.admin.database import SessionLocal
+    from backend.admin.models import AdminUser
+    from backend.admin.config import settings
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="无法验证凭据",
@@ -97,15 +97,19 @@ async def get_current_admin(
     if token is None:
         raise credentials_exception
 
-    token_data = decode_token(token)
-    if token_data is None or not token_data.is_admin:
+    token_data = decode_token(token, settings.SECRET_KEY, settings.ALGORITHM)
+    if token_data is None or not token_data.get("is_admin"):
         raise credentials_exception
 
-    admin = db.query(Admin).filter(Admin.id == token_data.user_id).first()
-    if admin is None:
-        raise credentials_exception
+    db = SessionLocal()
+    try:
+        admin = db.query(AdminUser).filter(AdminUser.id == token_data["user_id"]).first()
+        if admin is None:
+            raise credentials_exception
 
-    return admin
+        return admin
+    finally:
+        db.close()
 
 
 # ============ 敏感数据加密 ============
@@ -113,7 +117,6 @@ class Encryption:
     """AES加密工具类"""
 
     def __init__(self, key: str):
-        # 确保密钥长度为32字节(AES-256)
         self.key = key.encode()[:32].ljust(32, b'\0')
 
     def encrypt(self, plaintext: str) -> str:
@@ -129,7 +132,6 @@ class Encryption:
         )
         encryptor = cipher.encryptor()
 
-        # PKCS7 padding
         data = plaintext.encode()
         padding_length = 16 - (len(data) % 16)
         data += bytes([padding_length] * padding_length)
@@ -155,8 +157,6 @@ class Encryption:
             decryptor = cipher.decryptor()
 
             decrypted = decryptor.update(encrypted) + decryptor.finalize()
-
-            # Remove PKCS7 padding
             padding_length = decrypted[-1]
             decrypted = decrypted[:-padding_length]
 
@@ -165,4 +165,20 @@ class Encryption:
             return ""
 
 
-encryption = Encryption(settings.ENCRYPTION_KEY)
+# 延迟初始化加密实例
+_encryption_instance = None
+
+def get_encryption():
+    """获取加密实例"""
+    global _encryption_instance
+    if _encryption_instance is None:
+        from backend.admin.config import settings
+        _encryption_instance = Encryption(settings.ENCRYPTION_KEY)
+    return _encryption_instance
+
+# 兼容旧代码的属性
+class EncryptionWrapper:
+    def __getattr__(self, name):
+        return getattr(get_encryption(), name)
+
+encryption = EncryptionWrapper()

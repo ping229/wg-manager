@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 import sys
 sys.path.insert(0, '/opt/wg-manager')
 
-from backend.shared.database import get_db
-from backend.shared.models import Node, Peer, Admin
+from backend.admin.database import get_db
+from backend.admin.models import Node, Peer, AdminUser
 from backend.shared.schemas import NodeCreate, NodeUpdate, NodeResponse
 from backend.shared.auth import get_current_admin, encryption
 
@@ -58,7 +58,7 @@ async def check_node_online(node: Node) -> bool:
 @router.get("")
 async def list_nodes(
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """获取节点列表（包含在线状态）"""
     nodes = db.query(Node).all()
@@ -100,7 +100,7 @@ async def list_nodes(
             "online": is_online,
             "peer_count": peer_count,
             "api_url": node.api_url,
-            "api_key": encryption.decrypt(node.api_key),  # 返回解密后的API密钥
+            "api_key": encryption.decrypt(node.api_key),
             "blocked_patterns": node.blocked_patterns,
             "created_at": node.created_at
         })
@@ -112,9 +112,9 @@ async def list_nodes(
 async def get_node(
     node_id: int,
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
-    """获取单个节点详情（包含解密后的API密钥）"""
+    """获取单个节点详情"""
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="节点不存在")
@@ -146,14 +146,12 @@ async def get_node(
 def create_node(
     data: NodeCreate,
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """创建节点"""
-    # 检查名称是否重复
     if db.query(Node).filter(Node.name == data.name).first():
         raise HTTPException(status_code=400, detail="节点名称已存在")
 
-    # 生成密钥对
     private_key, public_key = generate_keypair()
 
     node = Node(
@@ -185,7 +183,7 @@ def update_node(
     node_id: int,
     data: NodeUpdate,
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """更新节点"""
     node = db.query(Node).filter(Node.id == node_id).first()
@@ -217,18 +215,13 @@ async def delete_node(
     node_id: int,
     force: bool = False,
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
-    """删除节点
-
-    Args:
-        force: 是否强制删除。如果为True，会先清空所有Peer再删除节点
-    """
+    """删除节点"""
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="节点不存在")
 
-    # 检查是否有Peer
     peers = db.query(Peer).filter(Peer.node_id == node_id).all()
 
     if peers:
@@ -238,14 +231,11 @@ async def delete_node(
                 detail=f"该节点下还有 {len(peers)} 个Peer，请先清空或使用强制删除"
             )
 
-        # 强制删除模式：先清空Agent上的所有Peer，然后删除数据库记录
         try:
             await call_agent(node, "/api/peer/clear")
-        except HTTPException as e:
-            # 即使Agent调用失败也继续删除（Agent可能已离线）
+        except HTTPException:
             pass
 
-        # 删除数据库中的所有Peer
         for peer in peers:
             db.delete(peer)
 
@@ -259,7 +249,7 @@ async def delete_node(
 async def disable_node(
     node_id: int,
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """禁用节点"""
     node = db.query(Node).filter(Node.id == node_id).first()
@@ -269,12 +259,11 @@ async def disable_node(
     if node.status == "disabled":
         raise HTTPException(status_code=400, detail="节点已被禁用")
 
-    # 清空所有Peer
     peers = db.query(Peer).filter(Peer.node_id == node_id).all()
     try:
         await call_agent(node, "/api/peer/clear")
     except HTTPException:
-        pass  # 即使Agent调用失败也继续
+        pass
 
     for peer in peers:
         db.delete(peer)
@@ -282,14 +271,14 @@ async def disable_node(
     node.status = "disabled"
     db.commit()
 
-    return {"message": "节点已禁用,所有Peer已清空"}
+    return {"message": "节点已禁用，所有Peer已清空"}
 
 
 @router.post("/{node_id}/enable")
 def enable_node(
     node_id: int,
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """启用节点"""
     node = db.query(Node).filter(Node.id == node_id).first()
@@ -309,7 +298,7 @@ def enable_node(
 async def sync_node(
     node_id: int,
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
+    current_admin: AdminUser = Depends(get_current_admin)
 ):
     """同步节点状态"""
     node = db.query(Node).filter(Node.id == node_id).first()

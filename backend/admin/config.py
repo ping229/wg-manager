@@ -4,15 +4,14 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """共享配置 - 用于向后兼容和 Agent 服务"""
     # 基础配置
     BASE_DIR: Path = Path("/opt/wg-manager")
     DATA_DIR: Path = Path("/opt/wg-manager/data")
     LOG_DIR: Path = Path("/opt/wg-manager/data/logs")
     CONFIG_DIR: Path = Path("/opt/wg-manager/data/configs")
 
-    # 数据库 (默认值，各服务可覆盖)
-    DATABASE_URL: str = "sqlite:////opt/wg-manager/data/wg.db"
+    # 数据库 - Admin 独立数据库
+    DATABASE_URL: str = "sqlite:////opt/wg-manager/data/admin.db"
 
     # JWT配置
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-this-secret-key-in-production")
@@ -22,23 +21,21 @@ class Settings(BaseSettings):
     # 加密密钥(用于加密私钥等敏感数据)
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "change-this-encryption-key-32bytes!!")
 
-    # Portal服务配置
-    PORTAL_HOST: str = os.getenv("PORTAL_HOST", "0.0.0.0")
-    PORTAL_PORT: int = int(os.getenv("PORTAL_PORT", "8080"))
-
     # Admin服务配置
     ADMIN_HOST: str = os.getenv("ADMIN_HOST", "127.0.0.1")
     ADMIN_PORT: int = int(os.getenv("ADMIN_PORT", "8081"))
-    ADMIN_URL: str = os.getenv("ADMIN_URL", "http://127.0.0.1:8081")
+
+    # Portal服务配置 - 用于调用 Portal API
+    PORTAL_URL: str = os.getenv("PORTAL_URL", "http://127.0.0.1:8080")
+    PORTAL_API_KEY: str = os.getenv("PORTAL_API_KEY", "")  # 调用 Portal API 的密钥
 
     # Agent服务配置
     AGENT_HOST: str = os.getenv("AGENT_HOST", "127.0.0.1")
     AGENT_PORT: int = int(os.getenv("AGENT_PORT", "8082"))
     DEFAULT_AGENT_URL: str = os.getenv("DEFAULT_AGENT_URL", "http://127.0.0.1:8082")
-    AGENT_API_KEY: str = os.getenv("AGENT_API_KEY", "")
+    AGENT_API_KEY: str = os.getenv("AGENT_API_KEY", "")  # Agent API密钥，为空时使用ENCRYPTION_KEY
 
-    # Portal/Admin API 密钥
-    PORTAL_API_KEY: str = os.getenv("PORTAL_API_KEY", "")
+    # API 密钥 - 供 Portal 调用 Admin API
     ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
 
     # WireGuard配置
