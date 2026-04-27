@@ -8,7 +8,7 @@ from pathlib import Path
 
 from backend.admin.config import settings, ensure_directories
 from backend.admin.database import init_db
-from backend.admin.routes import auth, nodes, users, audit, admins, peers, portal
+from backend.admin.routes import auth, nodes, users, audit, admins, peers, portal, portal_sites
 
 # 确保目录存在
 ensure_directories()
@@ -30,6 +30,7 @@ app.include_router(audit.router)
 app.include_router(admins.router)
 app.include_router(peers.router)
 app.include_router(portal.router)  # Portal API 路由
+app.include_router(portal_sites.router)  # Portal 站点管理
 
 # 静态文件托管
 FRONTEND_DIST = Path("/opt/wg-manager/frontend/admin/dist")

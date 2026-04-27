@@ -1,6 +1,7 @@
 """
 Portal API 路由 - 供 Portal 服务调用
 包含：节点列表、Peer 管理、配置下载等功能
+支持多 Portal 站点
 """
 import ipaddress
 import subprocess
@@ -14,20 +15,31 @@ import sys
 sys.path.insert(0, '/opt/wg-manager')
 
 from backend.admin.database import get_db
-from backend.admin.models import Node, Peer, PortalUser
-from backend.admin.config import settings
+from backend.admin.models import Node, Peer, PortalSite
 from backend.shared.auth import encryption
 
 router = APIRouter(prefix="/api/portal", tags=["Portal API"])
 
 
-def verify_portal_api_key(api_key: Optional[str] = Header(None, alias="X-Admin-API-Key")):
-    """验证 Portal API 密钥"""
-    if not settings.ADMIN_API_KEY:
-        raise HTTPException(status_code=500, detail="Admin API 密钥未配置")
-    if api_key != settings.ADMIN_API_KEY:
-        raise HTTPException(status_code=403, detail="无效的 API 密钥")
-    return True
+def verify_portal_site(
+    api_key: Optional[str] = Header(None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db)
+) -> PortalSite:
+    """验证 Portal API 密钥并返回对应的 Portal 站点"""
+    if not api_key:
+        raise HTTPException(status_code=401, detail="缺少 API 密钥")
+
+    # 查找匹配的 Portal 站点
+    sites = db.query(PortalSite).filter(PortalSite.status == "active").all()
+    for site in sites:
+        try:
+            decrypted_key = encryption.decrypt(site.api_key)
+            if decrypted_key == api_key:
+                return site
+        except:
+            continue
+
+    raise HTTPException(status_code=403, detail="无效的 API 密钥")
 
 
 def generate_keypair() -> tuple[str, str]:
@@ -48,8 +60,7 @@ def allocate_ip(db: Session, node: Node) -> str:
     network = ipaddress.ip_network(node.address_pool, strict=False)
     hosts = list(network.hosts())
 
-    # 从第二个IP开始分配(第一个给服务器)
-    for host in hosts[1:]:
+    for host in hosts[1:]:  # 从第二个IP开始分配
         ip = str(host)
         if ip not in used_ips:
             return ip
@@ -132,7 +143,7 @@ async def sync_node_public_key(node: Node, db: Session) -> str:
 @router.get("/nodes")
 async def get_nodes(
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_portal_api_key)
+    portal_site: PortalSite = Depends(verify_portal_site)
 ):
     """获取可用节点列表"""
     nodes = db.query(Node).filter(Node.status == "active").all()
@@ -158,7 +169,7 @@ async def get_nodes(
 async def get_node(
     node_id: int,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_portal_api_key)
+    portal_site: PortalSite = Depends(verify_portal_site)
 ):
     """获取节点详情"""
     node = db.query(Node).filter(Node.id == node_id, Node.status == "active").first()
@@ -190,17 +201,18 @@ async def get_node(
 async def get_peer(
     user_id: int,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_portal_api_key)
+    portal_site: PortalSite = Depends(verify_portal_site)
 ):
     """获取用户的 Peer 配置"""
-    peer = db.query(Peer).filter(Peer.portal_user_id == user_id).first()
+    peer = db.query(Peer).filter(
+        Peer.portal_site_id == portal_site.id,
+        Peer.portal_user_id == user_id
+    ).first()
 
     if not peer:
         raise HTTPException(status_code=404, detail="尚未生成配置")
 
     node = db.query(Node).filter(Node.id == peer.node_id).first()
-
-    # 同步公钥
     node_public_key = await sync_node_public_key(node, db)
 
     return {
@@ -237,13 +249,12 @@ async def create_peer(
     dns: str = None,
     keepalive: int = None,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_portal_api_key)
+    portal_site: PortalSite = Depends(verify_portal_site)
 ):
     """创建 Peer 配置"""
     import json
     import re
 
-    # 检查节点
     node = db.query(Node).filter(Node.id == node_id, Node.status == "active").first()
     if not node:
         raise HTTPException(status_code=404, detail="节点不存在或已禁用")
@@ -261,33 +272,28 @@ async def create_peer(
         except json.JSONDecodeError:
             pass
 
-    # 检查用户是否已有Peer
-    existing_peer = db.query(Peer).filter(Peer.portal_user_id == user_id).first()
+    # 检查用户是否已有Peer (在该 Portal 站点下)
+    existing_peer = db.query(Peer).filter(
+        Peer.portal_site_id == portal_site.id,
+        Peer.portal_user_id == user_id
+    ).first()
 
     if existing_peer:
-        # 删除旧Peer
         old_node = db.query(Node).filter(Node.id == existing_peer.node_id).first()
         if old_node:
             await remove_peer_from_agent(old_node, existing_peer.public_key)
-
         db.delete(existing_peer)
         db.commit()
 
-    # 同步公钥
     await sync_node_public_key(node, db)
 
-    # 生成新密钥对
     private_key, public_key = generate_keypair()
-
-    # 分配IP
     address = allocate_ip(db, node)
-
-    # 获取节点的默认限速
     upload_limit = node.default_upload_limit or 0
     download_limit = node.default_download_limit or 0
 
-    # 创建Peer记录
     peer = Peer(
+        portal_site_id=portal_site.id,
         portal_user_id=user_id,
         username=username,
         node_id=node.id,
@@ -304,14 +310,12 @@ async def create_peer(
     db.commit()
     db.refresh(peer)
 
-    # 调用Agent添加Peer
     try:
         await call_agent(node, "/api/peer/add", {
             "public_key": public_key,
             "address": address
         })
 
-        # 设置限速
         if upload_limit > 0 or download_limit > 0:
             await call_agent(node, "/api/peer/limit", {
                 "address": address,
@@ -319,7 +323,6 @@ async def create_peer(
                 "download_limit": download_limit
             })
     except HTTPException as e:
-        # Agent调用失败,删除本地记录
         db.delete(peer)
         db.commit()
         raise e
@@ -353,10 +356,13 @@ async def update_peer_settings(
     dns: str = None,
     keepalive: int = None,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_portal_api_key)
+    portal_site: PortalSite = Depends(verify_portal_site)
 ):
     """更新 Peer 设置"""
-    peer = db.query(Peer).filter(Peer.portal_user_id == user_id).first()
+    peer = db.query(Peer).filter(
+        Peer.portal_site_id == portal_site.id,
+        Peer.portal_user_id == user_id
+    ).first()
 
     if not peer:
         raise HTTPException(status_code=404, detail="尚未生成配置")
@@ -399,20 +405,21 @@ async def update_peer_settings(
 async def delete_peer(
     user_id: int,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_portal_api_key)
+    portal_site: PortalSite = Depends(verify_portal_site)
 ):
     """删除 Peer 配置"""
-    peer = db.query(Peer).filter(Peer.portal_user_id == user_id).first()
+    peer = db.query(Peer).filter(
+        Peer.portal_site_id == portal_site.id,
+        Peer.portal_user_id == user_id
+    ).first()
 
     if not peer:
         raise HTTPException(status_code=404, detail="尚未生成配置")
 
-    # 从Agent删除
     node = db.query(Node).filter(Node.id == peer.node_id).first()
     if node:
         await remove_peer_from_agent(node, peer.public_key)
 
-    # 删除本地记录
     db.delete(peer)
     db.commit()
 
@@ -423,23 +430,21 @@ async def delete_peer(
 async def get_peer_config(
     user_id: int,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_portal_api_key)
+    portal_site: PortalSite = Depends(verify_portal_site)
 ):
     """获取 Peer 配置文件内容"""
-    peer = db.query(Peer).filter(Peer.portal_user_id == user_id).first()
+    peer = db.query(Peer).filter(
+        Peer.portal_site_id == portal_site.id,
+        Peer.portal_user_id == user_id
+    ).first()
 
     if not peer:
         raise HTTPException(status_code=404, detail="尚未生成配置")
 
     node = db.query(Node).filter(Node.id == peer.node_id).first()
 
-    # 解密私钥
     private_key = encryption.decrypt(peer.private_key)
-
-    # 同步公钥
     node_public_key = await sync_node_public_key(node, db)
-
-    # Endpoint 格式: IP:端口 或 域名:端口
     endpoint = f"{node.endpoint}:{node.wg_port}"
 
     config_content = f"""[Interface]

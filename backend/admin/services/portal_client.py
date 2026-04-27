@@ -1,14 +1,14 @@
 import httpx
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 from backend.admin.config import settings
 
 
 class PortalClient:
-    """Portal API 客户端 - Admin 用于调用 Portal 服务管理用户"""
+    """Portal API 客户端 - Admin 用于调用指定 Portal 服务"""
 
-    def __init__(self):
-        self.base_url = settings.PORTAL_URL.rstrip('/')
-        self.api_key = settings.PORTAL_API_KEY
+    def __init__(self, url: str = None, api_key: str = None):
+        self.base_url = (url or settings.PORTAL_URL).rstrip('/')
+        self.api_key = api_key or settings.PORTAL_API_KEY
         self.timeout = 10.0
 
     def _get_headers(self) -> dict:
@@ -33,7 +33,7 @@ class PortalClient:
                     raise ValueError(f"Unsupported method: {method}")
 
                 if response.status_code == 401:
-                    raise Exception("Portal API 认证失败，请检查 PORTAL_API_KEY 配置")
+                    raise Exception("Portal API 认证失败")
                 if response.status_code == 403:
                     raise Exception("Portal API 权限不足")
                 if response.status_code != 200:
@@ -73,6 +73,19 @@ class PortalClient:
         """拒绝注册申请"""
         return await self._request("POST", f"/api/auth/admin/reject/{reg_id}?reason={reason}")
 
+    # 健康检查
+    async def health_check(self) -> bool:
+        """检查 Portal 是否在线"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{self.base_url}/health", timeout=3.0)
+                return response.status_code == 200
+        except:
+            return False
 
-# 全局客户端实例
-portal_client = PortalClient()
+
+def get_portal_client(portal_site) -> PortalClient:
+    """根据 Portal 站点配置创建客户端"""
+    from backend.shared.auth import encryption
+    api_key = encryption.decrypt(portal_site.api_key) if portal_site.api_key else ""
+    return PortalClient(url=portal_site.url, api_key=api_key)
