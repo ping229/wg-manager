@@ -89,6 +89,20 @@ check_dependencies() {
 install_python_deps() {
     log_info "安装 Python 依赖..."
 
+    # 确保安装目录存在
+    if [[ ! -d "$INSTALL_DIR" ]]; then
+        # 检查当前目录是否包含项目文件
+        local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if [[ -f "$script_dir/requirements.txt" && "$script_dir" != "$INSTALL_DIR" ]]; then
+            log_info "复制项目文件到 $INSTALL_DIR ..."
+            mkdir -p "$INSTALL_DIR"
+            cp -r "$script_dir"/* "$INSTALL_DIR/"
+        else
+            log_error "安装目录不存在且无法找到项目文件: $INSTALL_DIR"
+            exit 1
+        fi
+    fi
+
     cd $INSTALL_DIR
 
     # 创建虚拟环境
