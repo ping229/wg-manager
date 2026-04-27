@@ -7,6 +7,7 @@ sys.path.insert(0, '/opt/wg-manager')
 
 from backend.admin.database import get_db
 from backend.admin.models import AdminUser
+from backend.admin.config import settings
 from backend.shared.schemas import AdminLogin, AdminResponse, Token
 from backend.shared.auth import (
     verify_password,
@@ -30,7 +31,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         )
 
     access_token = create_access_token(
-        data={"user_id": admin.id, "is_admin": True}
+        data={"user_id": admin.id, "is_admin": True},
+        secret_key=settings.SECRET_KEY,
+        expires_minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
 
     return Token(access_token=access_token)
