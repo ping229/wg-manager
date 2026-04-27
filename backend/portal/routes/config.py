@@ -8,14 +8,21 @@ from backend.portal.database import get_db
 from backend.portal.models import User
 from backend.shared.schemas import PeerCreate, PeerSettings
 from backend.shared.auth import get_current_user
-from backend.portal.services.admin_client import admin_client
+from backend.portal.services.admin_client import get_admin_client
 
 router = APIRouter(prefix="/api/config", tags=["配置管理"])
 
 
 @router.get("")
-async def get_config(current_user: User = Depends(get_current_user)):
+async def get_config(
+    current_user: User = Depends(get_current_user),
+    db = Depends(get_db)
+):
     """获取当前配置信息"""
+    admin_client = get_admin_client(db)
+    if not admin_client:
+        raise HTTPException(status_code=503, detail="Admin 未配置或未接入")
+
     try:
         result = await admin_client.get_peer(current_user.id)
         if not result:
@@ -30,9 +37,14 @@ async def get_config(current_user: User = Depends(get_current_user)):
 @router.post("/generate")
 async def generate_config(
     data: PeerCreate,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db = Depends(get_db)
 ):
     """生成新配置"""
+    admin_client = get_admin_client(db)
+    if not admin_client:
+        raise HTTPException(status_code=503, detail="Admin 未配置或未接入")
+
     try:
         result = await admin_client.create_peer(
             user_id=current_user.id,
@@ -50,9 +62,14 @@ async def generate_config(
 @router.put("/settings")
 async def update_settings(
     data: PeerSettings,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db = Depends(get_db)
 ):
     """更新配置设置"""
+    admin_client = get_admin_client(db)
+    if not admin_client:
+        raise HTTPException(status_code=503, detail="Admin 未配置或未接入")
+
     try:
         result = await admin_client.update_peer_settings(
             user_id=current_user.id,
@@ -66,18 +83,22 @@ async def update_settings(
 
 
 @router.get("/download")
-async def download_config(current_user: User = Depends(get_current_user)):
+async def download_config(
+    current_user: User = Depends(get_current_user),
+    db = Depends(get_db)
+):
     """下载配置文件"""
+    admin_client = get_admin_client(db)
+    if not admin_client:
+        raise HTTPException(status_code=503, detail="Admin 未配置或未接入")
+
     try:
         config_content = await admin_client.get_peer_config(current_user.id)
 
-        # 从配置内容中提取节点名称作为文件名
-        # 格式: [Peer] 下有 Endpoint，可以从中提取
-        lines = config_content.split('\n')
         filename = "wg-client.conf"
+        lines = config_content.split('\n')
         for line in lines:
             if line.startswith('Endpoint'):
-                # Endpoint = 1.2.3.4:51820
                 endpoint = line.split('=')[1].strip().split(':')[0]
                 filename = f"wg-{endpoint}.conf"
                 break
@@ -93,8 +114,15 @@ async def download_config(current_user: User = Depends(get_current_user)):
 
 
 @router.delete("")
-async def delete_config(current_user: User = Depends(get_current_user)):
+async def delete_config(
+    current_user: User = Depends(get_current_user),
+    db = Depends(get_db)
+):
     """删除当前配置"""
+    admin_client = get_admin_client(db)
+    if not admin_client:
+        raise HTTPException(status_code=503, detail="Admin 未配置或未接入")
+
     try:
         result = await admin_client.delete_peer(current_user.id)
         return result

@@ -5,7 +5,7 @@ from .database import Base
 
 
 class AdminUser(Base):
-    """管理员表 - Admin 独立管理"""
+    """管理员表"""
     __tablename__ = "admins"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -15,15 +15,34 @@ class AdminUser(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class PortalApplication(Base):
+    """Portal 接入申请表"""
+    __tablename__ = "portal_applications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)  # Portal 名称
+    url = Column(String(255), nullable=False)  # Portal 地址
+    api_key = Column(String(100), nullable=False)  # Portal 的 API 密钥
+    description = Column(Text, nullable=True)  # 申请说明
+    status = Column(String(20), default="pending")  # pending, approved, rejected
+    reject_reason = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("admins.id"), nullable=True)
+
+    # 审批通过后关联的 PortalSite
+    portal_site_id = Column(Integer, ForeignKey("portal_sites.id"), nullable=True)
+
+
 class PortalSite(Base):
-    """Portal 站点表 - 管理多个 Portal"""
+    """已接入的 Portal 站点表"""
     __tablename__ = "portal_sites"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), unique=True, nullable=False)  # 站点名称，如 "北京Portal"
-    url = Column(String(255), nullable=False)  # Portal 地址，如 http://portal-beijing:8080
-    api_key = Column(String(100), nullable=False)  # 调用该 Portal 的 API 密钥
-    description = Column(Text, nullable=True)  # 描述
+    name = Column(String(100), unique=True, nullable=False)
+    url = Column(String(255), nullable=False)
+    api_key = Column(String(100), nullable=False)  # Portal 的 API 密钥（加密存储）
+    description = Column(Text, nullable=True)
     status = Column(String(20), default="active")  # active, disabled
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -36,20 +55,20 @@ class Node(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), unique=True, nullable=False)
-    endpoint = Column(String(255), nullable=False)  # 公网地址:端口
+    endpoint = Column(String(255), nullable=False)
     wg_port = Column(Integer, default=51820)
     wg_interface = Column(String(20), default="wg0")
     public_key = Column(String(100), nullable=False)
-    private_key = Column(Text, nullable=False)  # 加密存储
-    address_pool = Column(String(50), nullable=False)  # 如 10.100.0.0/24
+    private_key = Column(Text, nullable=False)
+    address_pool = Column(String(50), nullable=False)
     dns = Column(String(100), default="8.8.8.8")
     mtu = Column(Integer, default=1420)
     keepalive = Column(Integer, default=25)
     default_upload_limit = Column(Integer, default=0)
     default_download_limit = Column(Integer, default=0)
     status = Column(String(20), default="active")
-    api_url = Column(String(255), nullable=False)  # Agent API地址
-    api_key = Column(String(100), nullable=False)  # API密钥(加密存储)
+    api_url = Column(String(255), nullable=False)
+    api_key = Column(String(100), nullable=False)
     blocked_patterns = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -57,12 +76,12 @@ class Node(Base):
 
 
 class Peer(Base):
-    """Peer表 - 关联Portal用户"""
+    """Peer表"""
     __tablename__ = "peers"
 
     id = Column(Integer, primary_key=True, index=True)
-    portal_site_id = Column(Integer, ForeignKey("portal_sites.id"), nullable=False)  # 所属 Portal
-    portal_user_id = Column(Integer, nullable=False)  # Portal中的用户ID
+    portal_site_id = Column(Integer, ForeignKey("portal_sites.id"), nullable=False)
+    portal_user_id = Column(Integer, nullable=False)
     username = Column(String(50), index=True, nullable=False)
     node_id = Column(Integer, ForeignKey("nodes.id"), nullable=False)
     public_key = Column(String(100), nullable=False)

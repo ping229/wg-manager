@@ -8,7 +8,7 @@ from pathlib import Path
 
 from backend.portal.config import settings, ensure_directories
 from backend.portal.database import init_db
-from backend.portal.routes import auth, nodes, config
+from backend.portal.routes import auth, nodes, config, admin_connection
 
 # 确保目录存在
 ensure_directories()
@@ -26,6 +26,13 @@ app = FastAPI(
 app.include_router(auth.router)
 app.include_router(nodes.router)
 app.include_router(config.router)
+app.include_router(admin_connection.router)
+
+# 健康检查接口
+@app.get("/health")
+def health_check():
+    """健康检查"""
+    return {"status": "ok", "service": "wg-portal"}
 
 # 静态文件托管
 FRONTEND_DIST = Path("/opt/wg-manager/frontend/portal/dist")

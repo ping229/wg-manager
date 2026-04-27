@@ -8,7 +8,7 @@ from pathlib import Path
 
 from backend.admin.config import settings, ensure_directories
 from backend.admin.database import init_db
-from backend.admin.routes import auth, nodes, users, audit, admins, peers, portal, portal_sites
+from backend.admin.routes import auth, nodes, users, audit, admins, peers, portal, portal_sites, portal_applications
 
 # 确保目录存在
 ensure_directories()
@@ -29,8 +29,15 @@ app.include_router(users.router)
 app.include_router(audit.router)
 app.include_router(admins.router)
 app.include_router(peers.router)
-app.include_router(portal.router)  # Portal API 路由
-app.include_router(portal_sites.router)  # Portal 站点管理
+app.include_router(portal.router)
+app.include_router(portal_sites.router)
+app.include_router(portal_applications.router)
+
+# 健康检查接口
+@app.get("/health")
+def health_check():
+    """健康检查"""
+    return {"status": "ok", "service": "wg-admin"}
 
 # 静态文件托管
 FRONTEND_DIST = Path("/opt/wg-manager/frontend/admin/dist")
@@ -61,7 +68,6 @@ async def startup_event():
 
     db = SessionLocal()
     try:
-        # 检查是否存在超级管理员
         if not db.query(AdminUser).filter(AdminUser.role == "super_admin").first():
             password = settings.SUPER_ADMIN_PASSWORD[:72] if len(settings.SUPER_ADMIN_PASSWORD) > 72 else settings.SUPER_ADMIN_PASSWORD
             admin = AdminUser(

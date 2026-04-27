@@ -1,14 +1,14 @@
 import httpx
-from typing import Optional, List, Dict, Any
-from backend.portal.config import settings
+from typing import Optional, List, Dict
+from sqlalchemy.orm import Session
 
 
 class AdminClient:
     """Admin API 客户端 - Portal 用于调用 Admin 服务"""
 
-    def __init__(self):
-        self.base_url = settings.ADMIN_URL.rstrip('/')
-        self.api_key = settings.ADMIN_API_KEY
+    def __init__(self, url: str = None, api_key: str = None):
+        self.base_url = url.rstrip('/') if url else None
+        self.api_key = api_key
         self.timeout = 10.0
 
     def _get_headers(self) -> dict:
@@ -16,6 +16,9 @@ class AdminClient:
 
     async def _request(self, method: str, endpoint: str, data: dict = None) -> dict:
         """发送请求到 Admin API"""
+        if not self.base_url:
+            raise Exception("Admin 未配置或未接入")
+
         url = f"{self.base_url}{endpoint}"
         headers = self._get_headers()
 
@@ -33,7 +36,7 @@ class AdminClient:
                     raise ValueError(f"Unsupported method: {method}")
 
                 if response.status_code == 401:
-                    raise Exception("Admin API 认证失败，请检查 ADMIN_API_KEY 配置")
+                    raise Exception("Admin API 认证失败")
                 if response.status_code == 403:
                     raise Exception("Admin API 权限不足")
                 if response.status_code != 200:
@@ -98,5 +101,17 @@ class AdminClient:
             return response.text
 
 
-# 全局客户端实例
-admin_client = AdminClient()
+def get_admin_client(db: Session) -> Optional[AdminClient]:
+    """
+    获取 Admin 客户端实例
+    从数据库读取 AdminConnection 配置
+    """
+    from backend.portal.models import AdminConnection
+    from backend.portal.routes.admin_connection import decrypt_api_key
+
+    connection = db.query(AdminConnection).first()
+    if not connection or connection.status != "approved":
+        return None
+
+    api_key = decrypt_api_key(connection.api_key)
+    return AdminClient(url=connection.url, api_key=api_key)
