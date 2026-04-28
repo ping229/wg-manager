@@ -174,8 +174,32 @@ generate_config() {
     local env_file="$INSTALL_DIR/.env"
 
     if [[ -f "$env_file" ]]; then
-        log_warn ".env 文件已存在，跳过生成"
-        return
+        # 检查数据库路径是否匹配当前部署模式
+        local db_url=$(grep "^DATABASE_URL=" "$env_file" 2>/dev/null | cut -d'=' -f2-)
+        local expected_db=""
+
+        case $DEPLOY_MODE in
+            portal)
+                expected_db="portal.db"
+                ;;
+            admin)
+                expected_db="admin.db"
+                ;;
+            all)
+                expected_db="wg.db"
+                ;;
+        esac
+
+        if [[ -n "$db_url" ]] && [[ "$db_url" == *"$expected_db"* ]]; then
+            log_warn ".env 文件已存在且配置正确，跳过生成"
+            return
+        else
+            log_warn ".env 文件已存在但数据库路径不正确"
+            log_warn "当前: $db_url"
+            log_warn "期望: sqlite:///${INSTALL_DIR}/data/${expected_db}"
+            log_warn "请删除 .env 文件后重新运行: rm $env_file"
+            exit 1
+        fi
     fi
 
     # 生成随机密钥
