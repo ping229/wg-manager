@@ -24,19 +24,12 @@ router = APIRouter(prefix="/api/auth", tags=["认证"])
 @router.post("/register", response_model=dict)
 def register(data: UserRegister, db: Session = Depends(get_db)):
     """用户注册申请"""
-    # 检查用户名是否已存在
+    # 检查用户名是否已存在（用户名唯一，邮箱可重复）
     if db.query(User).filter(User.username == data.username).first():
         raise HTTPException(status_code=400, detail="用户名已存在")
 
     if db.query(Registration).filter(Registration.username == data.username).first():
         raise HTTPException(status_code=400, detail="该用户名已有待审核的注册申请")
-
-    # 检查邮箱是否已存在
-    if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(status_code=400, detail="邮箱已被注册")
-
-    if db.query(Registration).filter(Registration.email == data.email).first():
-        raise HTTPException(status_code=400, detail="该邮箱已有待审核的注册申请")
 
     # 创建注册申请
     registration = Registration(
@@ -302,13 +295,9 @@ def admin_create_user(
     _: bool = Depends(verify_key)
 ):
     """Admin 创建用户"""
-    # 检查用户名是否已存在
+    # 检查用户名是否已存在（用户名唯一，邮箱可重复）
     if db.query(User).filter(User.username == data.username).first():
         raise HTTPException(status_code=400, detail="用户名已存在")
-
-    # 检查邮箱是否已存在
-    if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(status_code=400, detail="邮箱已被使用")
 
     # 创建用户
     user = User(
@@ -342,21 +331,12 @@ def admin_batch_create_users(
 
     for user_data in data.users:
         try:
-            # 检查用户名是否已存在
+            # 检查用户名是否已存在（用户名唯一，邮箱可重复）
             if db.query(User).filter(User.username == user_data.username).first():
                 failed.append({
                     "username": user_data.username,
                     "email": user_data.email,
                     "reason": "用户名已存在"
-                })
-                continue
-
-            # 检查邮箱是否已存在
-            if db.query(User).filter(User.email == user_data.email).first():
-                failed.append({
-                    "username": user_data.username,
-                    "email": user_data.email,
-                    "reason": "邮箱已被使用"
                 })
                 continue
 
