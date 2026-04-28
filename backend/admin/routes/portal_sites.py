@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 import httpx
+import secrets
 
 import sys
 sys.path.insert(0, '/opt/wg-manager')
@@ -212,3 +213,43 @@ async def test_portal_site(
         return {"success": False, "message": f"连接失败: {str(e)}"}
     except Exception as e:
         return {"success": False, "message": f"错误: {str(e)}"}
+
+
+# ============ Admin API Key 管理 ============
+
+from backend.admin.models import AdminSetting
+
+
+@router.get("/admin-api-key")
+def get_admin_api_key(
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """获取 Admin API Key（用于 Portal 连接 Admin）"""
+    setting = db.query(AdminSetting).filter(AdminSetting.key == "admin_api_key").first()
+    if not setting:
+        # 自动生成一个
+        api_key = secrets.token_hex(16)
+        setting = AdminSetting(key="admin_api_key", value=api_key)
+        db.add(setting)
+        db.commit()
+
+    return {"admin_api_key": setting.value}
+
+
+@router.post("/admin-api-key/regenerate")
+def regenerate_admin_api_key(
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """重新生成 Admin API Key"""
+    new_key = secrets.token_hex(16)
+    setting = db.query(AdminSetting).filter(AdminSetting.key == "admin_api_key").first()
+    if setting:
+        setting.value = new_key
+    else:
+        setting = AdminSetting(key="admin_api_key", value=new_key)
+        db.add(setting)
+    db.commit()
+
+    return {"admin_api_key": new_key, "message": "API Key 已重新生成，请更新所有 Portal 的配置"}

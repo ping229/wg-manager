@@ -4,6 +4,17 @@ from sqlalchemy.orm import relationship
 from .database import Base
 
 
+class AdminSetting(Base):
+    """Admin 配置表（键值对存储）"""
+    __tablename__ = "admin_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String(100), unique=True, nullable=False)
+    value = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AdminUser(Base):
     """管理员表"""
     __tablename__ = "admins"
