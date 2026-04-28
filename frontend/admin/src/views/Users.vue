@@ -22,12 +22,27 @@
               <el-icon><Upload /></el-icon>
               批量导入
             </el-button>
+            <el-button @click="exportUsers" :disabled="users.length === 0">
+              <el-icon><Download /></el-icon>
+              导出用户
+            </el-button>
           </div>
         </div>
       </template>
 
       <el-table :data="users" v-loading="loading">
         <el-table-column prop="username" label="用户名" width="120" />
+        <el-table-column label="密码" width="150">
+          <template #default="{ row }">
+            <div class="password-cell">
+              <span v-if="row._showPassword">{{ row.password }}</span>
+              <span v-else>******</span>
+              <el-button size="small" text @click="togglePassword(row)">
+                {{ row._showPassword ? '隐藏' : '显示' }}
+              </el-button>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="email" label="邮箱" />
         <el-table-column label="Portal站点" width="120">
           <template #default="{ row }">
@@ -55,8 +70,9 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="250">
           <template #default="{ row }">
+            <el-button size="small" @click="showPasswordDialog(row)">改密</el-button>
             <el-button
               size="small"
               :type="row.status === 'active' ? 'warning' : 'success'"
@@ -128,13 +144,32 @@ user2,pass456,user2@example.com</pre>
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 修改密码对话框 -->
+    <el-dialog v-model="passwordDialogVisible" title="修改密码" width="400px">
+      <el-form :model="passwordForm" ref="passwordFormRef" label-width="80px">
+        <el-form-item label="用户名">
+          <el-input v-model="passwordForm.username" disabled />
+        </el-form-item>
+        <el-form-item label="当前密码">
+          <el-input v-model="passwordForm.currentPassword" disabled />
+        </el-form-item>
+        <el-form-item label="新密码" prop="password">
+          <el-input v-model="passwordForm.newPassword" type="password" placeholder="请输入新密码" show-password />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="passwordDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="updatePassword" :loading="submitting">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload, UploadFilled } from '@element-plus/icons-vue'
+import { Plus, Upload, Download, UploadFilled } from '@element-plus/icons-vue'
 import { api } from '../api'
 
 const loading = ref(false)
@@ -145,6 +180,7 @@ const selectedPortalSite = ref(null)
 const statusFilter = ref('')
 const createDialogVisible = ref(false)
 const batchImportDialogVisible = ref(false)
+const passwordDialogVisible = ref(false)
 const createFormRef = ref()
 const uploadRef = ref()
 const parsedUsers = ref([])
@@ -153,6 +189,14 @@ const createForm = reactive({
   username: '',
   email: '',
   password: ''
+})
+
+const passwordForm = reactive({
+  portal_site_id: null,
+  user_id: null,
+  username: '',
+  currentPassword: '',
+  newPassword: ''
 })
 
 const createRules = {
@@ -193,10 +237,14 @@ async function fetchUsers() {
       params.status = statusFilter.value
     }
     const { data } = await api.get('/api/users', { params })
-    users.value = data
+    users.value = data.map(u => ({ ...u, _showPassword: false }))
   } finally {
     loading.value = false
   }
+}
+
+function togglePassword(user) {
+  user._showPassword = !user._showPassword
 }
 
 function showCreateDialog() {
@@ -285,6 +333,67 @@ async function batchImport() {
   }
 }
 
+function showPasswordDialog(user) {
+  passwordForm.portal_site_id = user.portal_site_id
+  passwordForm.user_id = user.id
+  passwordForm.username = user.username
+  passwordForm.currentPassword = user.password
+  passwordForm.newPassword = ''
+  passwordDialogVisible.value = true
+}
+
+async function updatePassword() {
+  if (!passwordForm.newPassword) {
+    ElMessage.warning('请输入新密码')
+    return
+  }
+
+  submitting.value = true
+  try {
+    await api.put(`/api/users/${passwordForm.portal_site_id}/${passwordForm.user_id}/password`, {
+      password: passwordForm.newPassword
+    })
+    ElMessage.success('密码修改成功')
+    passwordDialogVisible.value = false
+    fetchUsers()
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '修改失败')
+  } finally {
+    submitting.value = false
+  }
+}
+
+function exportUsers() {
+  if (users.value.length === 0) {
+    ElMessage.warning('没有用户数据可导出')
+    return
+  }
+
+  // 生成 CSV 内容
+  const headers = ['用户名', '密码', '邮箱', '状态', 'Portal站点', '注册时间']
+  const rows = users.value.map(u => [
+    u.username,
+    u.password,
+    u.email,
+    u.status,
+    u.portal_site_name,
+    formatDate(u.created_at)
+  ])
+
+  const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
+
+  // 下载文件
+  const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8' })
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `users_${selectedPortalSite.value}_${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  window.URL.revokeObjectURL(url)
+
+  ElMessage.success(`已导出 ${users.value.length} 个用户`)
+}
+
 async function toggleStatus(user) {
   const action = user.status === 'active' ? '禁用' : '启用'
   try {
@@ -331,12 +440,19 @@ onMounted(() => {
 .left-actions, .right-actions {
   display: flex;
   align-items: center;
+  gap: 10px;
 }
 
 .peer-node {
   margin-left: 8px;
   color: #606266;
   font-size: 12px;
+}
+
+.password-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .batch-import-tips {

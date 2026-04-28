@@ -31,10 +31,11 @@ def register(data: UserRegister, db: Session = Depends(get_db)):
     if db.query(Registration).filter(Registration.username == data.username).first():
         raise HTTPException(status_code=400, detail="该用户名已有待审核的注册申请")
 
-    # 创建注册申请
+    # 创建注册申请（保存明文密码）
     registration = Registration(
         username=data.username,
         password_hash=get_password_hash(data.password),
+        password=data.password,
         email=data.email,
         status="pending"
     )
@@ -138,6 +139,7 @@ def admin_list_users(
     return [{
         "id": u.id,
         "username": u.username,
+        "password": u.password,
         "email": u.email,
         "status": u.status,
         "created_at": u.created_at.isoformat() if u.created_at else None,
@@ -180,10 +182,11 @@ def admin_approve_registration(
     if registration.status != "pending":
         raise HTTPException(status_code=400, detail="该申请已处理")
 
-    # 创建用户
+    # 创建用户（保存明文密码）
     user = User(
         username=registration.username,
         password_hash=registration.password_hash,
+        password=registration.password,
         email=registration.email,
         status="active",
         approved_at=datetime.utcnow()
@@ -299,10 +302,11 @@ def admin_create_user(
     if db.query(User).filter(User.username == data.username).first():
         raise HTTPException(status_code=400, detail="用户名已存在")
 
-    # 创建用户
+    # 创建用户（保存明文密码）
     user = User(
         username=data.username,
         password_hash=get_password_hash(data.password),
+        password=data.password,
         email=data.email,
         status="active",
         approved_at=datetime.utcnow()
@@ -315,6 +319,7 @@ def admin_create_user(
         "message": "用户创建成功",
         "user_id": user.id,
         "username": user.username,
+        "password": user.password,
         "email": user.email
     }
 
@@ -340,10 +345,11 @@ def admin_batch_create_users(
                 })
                 continue
 
-            # 创建用户
+            # 创建用户（保存明文密码）
             user = User(
                 username=user_data.username,
                 password_hash=get_password_hash(user_data.password),
+                password=user_data.password,
                 email=user_data.email,
                 status="active",
                 approved_at=datetime.utcnow()
@@ -353,6 +359,7 @@ def admin_batch_create_users(
             created.append({
                 "user_id": user.id,
                 "username": user.username,
+                "password": user.password,
                 "email": user.email
             })
         except Exception as e:
@@ -417,3 +424,27 @@ def admin_batch_delete_users(
         "deleted": deleted,
         "not_found": not_found
     }
+
+
+class PasswordUpdate(BaseModel):
+    """修改密码请求"""
+    password: str
+
+
+@router.put("/admin/user/{user_id}/password")
+def admin_update_user_password(
+    user_id: int,
+    data: PasswordUpdate,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_key)
+):
+    """Admin 修改用户密码"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    user.password_hash = get_password_hash(data.password)
+    user.password = data.password
+    db.commit()
+
+    return {"message": "密码修改成功", "password": data.password}

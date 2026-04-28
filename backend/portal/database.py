@@ -35,8 +35,21 @@ def migrate_db():
     else:
         users_columns = []
 
+    # 获取 registrations 表的列名
+    if inspector.has_table('registrations'):
+        registrations_columns = [col['name'] for col in inspector.get_columns('registrations')]
+    else:
+        registrations_columns = []
+
     # 添加缺失的字段
     with engine.connect() as conn:
+        # users 表
+        if users_columns and 'password' not in users_columns:
+            print("Adding password column to users table...")
+            conn.execute(text('ALTER TABLE users ADD COLUMN password VARCHAR(100) NOT NULL DEFAULT ""'))
+            conn.commit()
+            print("Column password added successfully")
+
         if users_columns and 'reject_reason' not in users_columns:
             print("Adding reject_reason column to users table...")
             conn.execute(text('ALTER TABLE users ADD COLUMN reject_reason VARCHAR(255)'))
@@ -48,6 +61,13 @@ def migrate_db():
             conn.execute(text('ALTER TABLE users ADD COLUMN approved_at DATETIME'))
             conn.commit()
             print("Column approved_at added successfully")
+
+        # registrations 表
+        if registrations_columns and 'password' not in registrations_columns:
+            print("Adding password column to registrations table...")
+            conn.execute(text('ALTER TABLE registrations ADD COLUMN password VARCHAR(100) NOT NULL DEFAULT ""'))
+            conn.commit()
+            print("Column password added successfully")
 
 
 def init_db():

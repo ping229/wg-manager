@@ -328,3 +328,24 @@ async def delete_user_peer(
     db.commit()
 
     return {"message": "Peer 配置已删除"}
+
+
+@router.put("/{portal_site_id}/{user_id}/password")
+async def update_user_password(
+    portal_site_id: int,
+    user_id: int,
+    password: str = Body(..., embed=True),
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """修改用户密码"""
+    site = db.query(PortalSite).filter(PortalSite.id == portal_site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Portal站点不存在")
+
+    try:
+        client = get_portal_client(site)
+        result = await client.update_user_password(user_id, password)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

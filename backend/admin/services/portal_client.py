@@ -94,6 +94,10 @@ class PortalClient:
         """批量删除用户"""
         return await self._request("POST", "/api/auth/admin/users/batch-delete", {"user_ids": user_ids})
 
+    async def update_user_password(self, user_id: int, password: str) -> Dict:
+        """修改用户密码"""
+        return await self._request("PUT", f"/api/auth/admin/user/{user_id}/password", {"password": password})
+
     # 健康检查
     async def health_check(self) -> bool:
         """检查 Portal 是否在线"""
