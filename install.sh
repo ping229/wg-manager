@@ -183,24 +183,79 @@ generate_config() {
     local encryption_key=$(openssl rand -hex 16)
     local portal_api_key=$(openssl rand -hex 16)
 
-    cat > "$env_file" << EOF
-# WireGuard 管理系统配置文件
+    if [[ $DEPLOY_MODE == "portal" ]]; then
+        cat > "$env_file" << EOF
+# WireGuard Portal 配置文件
 # 生成时间: $(date)
-# 部署模式: $DEPLOY_MODE
 
-# JWT 密钥 (Portal 和 Admin 独立，无需相同)
+# JWT 密钥 (Portal 独立)
 SECRET_KEY=${secret_key}
 
 # 数据加密密钥 (32字节)
 ENCRYPTION_KEY=${encryption_key}
 
-# Portal 名称 (仅 Portal 模式需要)
+# Portal 名称 (发送给 Admin 显示)
 PORTAL_NAME=WireGuard Portal
 
-# Portal API 密钥 (供 Admin 回调使用)
+# Portal API 密钥 (供 Admin 回调)
 PORTAL_API_KEY=${portal_api_key}
 
-# 超级管理员初始密码 (仅 Admin 使用，首次启动后请修改)
+# Portal 外部访问地址 (用于 Admin 回调)
+# PORTAL_URL=http://your-portal-host:8080
+
+# Portal 服务配置
+PORTAL_HOST=0.0.0.0
+PORTAL_PORT=8080
+
+# 数据库
+DATABASE_URL=sqlite:///${INSTALL_DIR}/data/portal.db
+
+# ============ Admin 连接配置 (必填) ============
+# 请修改为实际的 Admin 地址和 API 密钥
+ADMIN_URL=http://admin-host:8081
+ADMIN_API_KEY=please-change-this-to-admin-api-key
+EOF
+    elif [[ $DEPLOY_MODE == "admin" ]]; then
+        cat > "$env_file" << EOF
+# WireGuard Admin 配置文件
+# 生成时间: $(date)
+
+# JWT 密钥 (Admin 独立)
+SECRET_KEY=${secret_key}
+
+# 数据加密密钥 (32字节，用于加密存储敏感数据)
+ENCRYPTION_KEY=${encryption_key}
+
+# 超级管理员初始密码 (首次启动后请修改)
+SUPER_ADMIN_PASSWORD=admin123
+
+# Admin 服务配置
+ADMIN_HOST=127.0.0.1
+ADMIN_PORT=8081
+
+# 数据库
+DATABASE_URL=sqlite:///${INSTALL_DIR}/data/admin.db
+EOF
+    else
+        # all 模式
+        cat > "$env_file" << EOF
+# WireGuard 管理系统配置文件
+# 生成时间: $(date)
+# 部署模式: all (Portal + Admin + Agent)
+
+# JWT 密钥
+SECRET_KEY=${secret_key}
+
+# 数据加密密钥 (32字节)
+ENCRYPTION_KEY=${encryption_key}
+
+# Portal 名称
+PORTAL_NAME=WireGuard Portal
+
+# Portal API 密钥
+PORTAL_API_KEY=${portal_api_key}
+
+# 超级管理员初始密码
 SUPER_ADMIN_PASSWORD=admin123
 
 # Portal 服务配置
@@ -211,33 +266,43 @@ PORTAL_PORT=8080
 ADMIN_HOST=127.0.0.1
 ADMIN_PORT=8081
 
-# 数据库路径
-DATABASE_URL=sqlite:///${INSTALL_DIR}/data/portal.db
+# Admin 连接配置 (Portal 连接本地 Admin)
+ADMIN_URL=http://127.0.0.1:8081
+ADMIN_API_KEY=${portal_api_key}
 
 # Agent 服务配置
 AGENT_HOST=127.0.0.1
 AGENT_PORT=8082
 DEFAULT_AGENT_URL=http://127.0.0.1:8082
 AGENT_API_KEY=
+
+# 数据库
+DATABASE_URL=sqlite:///${INSTALL_DIR}/data/wg.db
 EOF
+    fi
 
     chmod 600 "$env_file"
     log_info "配置文件已生成: $env_file"
 
     if [[ $DEPLOY_MODE == "portal" ]]; then
         log_info ""
-        log_info "Portal 部署完成后的接入步骤："
-        log_info "  1. 访问 Portal 首页"
-        log_info "  2. 在页面下方填写 Admin 的 URL 和 API 密钥"
-        log_info "  3. 点击'申请接入'按钮"
-        log_info "  4. 等待 Admin 审核通过"
-        log_info ""
+        log_warn "============================================"
+        log_warn "  Portal 接入配置 (重要)"
+        log_warn "============================================"
+        log_warn ""
+        log_warn "请编辑 .env 文件，修改以下配置："
+        log_warn "  ADMIN_URL    - Admin 后台地址"
+        log_warn "  ADMIN_API_KEY - Admin API 密钥"
+        log_warn ""
+        log_warn "然后启动服务，访问 Portal 首页点击'申请接入'"
+        log_warn ""
     elif [[ $DEPLOY_MODE == "admin" ]]; then
         log_info ""
-        log_info "Admin 部署完成后的操作："
-        log_info "  1. 访问 Admin 后台 (默认账号: admin / admin123)"
-        log_info "  2. 在'Portal接入管理'中审核 Portal 的接入申请"
-        log_info "  3. 审核通过后 Portal 即可正常使用"
+        log_info "Admin 部署完成："
+        log_info "  1. 启动服务: systemctl start wg-admin"
+        log_info "  2. 访问后台: http://HOST:8081"
+        log_info "  3. 默认账号: admin / admin123"
+        log_info "  4. 在'Portal接入管理'中审核 Portal 申请"
         log_info ""
     fi
 }

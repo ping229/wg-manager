@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     PORTAL_NAME: str = os.getenv("PORTAL_NAME", "WireGuard Portal")
     PORTAL_API_KEY: str = os.getenv("PORTAL_API_KEY", "")
 
+    # Portal 外部访问地址（发送给 Admin）
+    PORTAL_URL: str = os.getenv("PORTAL_URL", "")
+
+    # Admin 连接配置 - 从配置文件读取
+    ADMIN_URL: str = os.getenv("ADMIN_URL", "")  # Admin 地址，如 http://admin-host:8081
+    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")  # Admin 的 API 密钥
+
     # 数据加密密钥（用于加密存储的 API Key）
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "change-this-encryption-key-32bytes!!")
 

@@ -17,7 +17,7 @@ class AdminClient:
     async def _request(self, method: str, endpoint: str, data: dict = None) -> dict:
         """发送请求到 Admin API"""
         if not self.base_url:
-            raise Exception("Admin 未配置或未接入")
+            raise Exception("Admin 未配置")
 
         url = f"{self.base_url}{endpoint}"
         headers = self._get_headers()
@@ -104,14 +104,22 @@ class AdminClient:
 def get_admin_client(db: Session) -> Optional[AdminClient]:
     """
     获取 Admin 客户端实例
-    从数据库读取 AdminConnection 配置
+    优先从配置文件读取，检查数据库中的连接状态
     """
     from backend.portal.models import AdminConnection
-    from backend.portal.routes.admin_connection import decrypt_api_key
+    from backend.portal.config import settings
 
-    connection = db.query(AdminConnection).first()
-    if not connection or connection.status != "approved":
+    # 检查配置文件
+    if not settings.ADMIN_URL or not settings.ADMIN_API_KEY:
         return None
 
-    api_key = decrypt_api_key(connection.api_key)
-    return AdminClient(url=connection.url, api_key=api_key)
+    # 检查数据库中的连接状态
+    connection = db.query(AdminConnection).first()
+    if connection and connection.status == "rejected":
+        return None  # 被拒绝则不可用
+
+    # 如果已批准或未申请过，返回客户端
+    if not connection or connection.status == "approved":
+        return AdminClient(url=settings.ADMIN_URL, api_key=settings.ADMIN_API_KEY)
+
+    return None  # pending 状态也不可用
