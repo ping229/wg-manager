@@ -12,7 +12,7 @@ sys.path.insert(0, '/opt/wg-manager')
 
 from backend.admin.database import get_db
 from backend.admin.models import PortalSite, AdminUser
-from backend.shared.auth import get_current_admin, encryption
+from backend.shared.auth import get_current_admin
 
 router = APIRouter(prefix="/api/portal-sites", tags=["Portal站点管理"])
 
@@ -61,7 +61,7 @@ async def list_portal_sites(
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{site.url.rstrip('/')}/health",
-                    headers={"X-Admin-API-Key": encryption.decrypt(site.api_key)},
+                    headers={"X-Admin-API-Key": site.api_key},
                     timeout=3.0
                 )
                 online = response.status_code == 200
@@ -91,10 +91,11 @@ def create_portal_site(
     if db.query(PortalSite).filter(PortalSite.name == data.name).first():
         raise HTTPException(status_code=400, detail="站点名称已存在")
 
+    # Portal API Key 明文存储（只是调用凭证，不需要加密）
     site = PortalSite(
         name=data.name,
         url=data.url,
-        api_key=encryption.encrypt(data.api_key),
+        api_key=data.api_key,
         description=data.description,
         status="active"
     )
@@ -137,7 +138,7 @@ def update_portal_site(
         site.url = data.url
 
     if data.api_key is not None:
-        site.api_key = encryption.encrypt(data.api_key)
+        site.api_key = data.api_key  # 明文存储
 
     if data.description is not None:
         site.description = data.description
@@ -200,7 +201,7 @@ async def test_portal_site(
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{site.url.rstrip('/')}/health",
-                headers={"X-Admin-API-Key": encryption.decrypt(site.api_key)},
+                headers={"X-Admin-API-Key": site.api_key},
                 timeout=5.0
             )
             if response.status_code == 200:

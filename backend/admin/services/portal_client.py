@@ -86,6 +86,7 @@ class PortalClient:
 
 def get_portal_client(portal_site) -> PortalClient:
     """根据 Portal 站点配置创建客户端"""
-    from backend.shared.auth import encryption
-    api_key = encryption.decrypt(portal_site.api_key) if portal_site.api_key else ""
+    # Portal API Key 是调用凭证，明文存储即可（不需要加密）
+    # 因为 Portal 和 Admin 独立部署，ENCRYPTION_KEY 不同
+    api_key = portal_site.api_key or ""
     return PortalClient(url=portal_site.url, api_key=api_key)
