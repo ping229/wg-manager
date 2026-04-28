@@ -118,7 +118,7 @@ const form = ref({
 const loadSites = async () => {
   loading.value = true
   try {
-    const res = await api.get('/portal-sites')
+    const res = await api.get('/api/portal-sites')
     sites.value = res.data
   } catch (error) {
     ElMessage.error('加载失败: ' + (error.response?.data?.detail || error.message))
@@ -129,7 +129,7 @@ const loadSites = async () => {
 
 const loadApiKey = async () => {
   try {
-    const res = await api.get('/portal-sites/admin-api-key')
+    const res = await api.get('/api/portal-sites/admin-api-key')
     adminApiKey.value = res.data.admin_api_key
   } catch (error) {
     console.error('加载 API Key 失败:', error)
@@ -148,7 +148,7 @@ const regenerateApiKey = async () => {
       '警告',
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
-    const res = await api.post('/portal-sites/admin-api-key/regenerate')
+    const res = await api.post('/api/portal-sites/admin-api-key/regenerate')
     adminApiKey.value = res.data.admin_api_key
     ElMessage.success('API Key 已重新生成，请更新所有 Portal 的配置')
   } catch (error) {
@@ -186,10 +186,10 @@ const saveSite = async () => {
 
   try {
     if (isEdit.value) {
-      await api.put(`/portal-sites/${editId.value}`, form.value)
+      await api.put(`/api/portal-sites/${editId.value}`, form.value)
       ElMessage.success('更新成功')
     } else {
-      await api.post('/portal-sites', form.value)
+      await api.post('/api/portal-sites', form.value)
       ElMessage.success('添加成功')
     }
     dialogVisible.value = false
@@ -201,7 +201,7 @@ const saveSite = async () => {
 
 const testConnection = async (site) => {
   try {
-    const res = await api.post(`/portal-sites/${site.id}/test`)
+    const res = await api.post(`/api/portal-sites/${site.id}/test`)
     if (res.data.success) {
       ElMessage.success('连接成功')
     } else {
@@ -219,7 +219,7 @@ const deleteSite = async (site) => {
       '确认删除',
       { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
     )
-    await api.delete(`/portal-sites/${site.id}`)
+    await api.delete(`/api/portal-sites/${site.id}`)
     ElMessage.success('删除成功')
     loadSites()
   } catch (error) {
