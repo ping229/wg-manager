@@ -1,3 +1,4 @@
+import httpx
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordRequestForm
@@ -24,12 +25,23 @@ router = APIRouter(prefix="/api/auth", tags=["认证"])
 @router.post("/register", response_model=dict)
 def register(data: UserRegister, db: Session = Depends(get_db)):
     """用户注册申请"""
-    # 检查用户名是否已存在（用户名唯一，邮箱可重复）
+    # 检查用户名是否已存在
     if db.query(User).filter(User.username == data.username).first():
         raise HTTPException(status_code=400, detail="用户名已存在")
 
-    if db.query(Registration).filter(Registration.username == data.username).first():
+    # 检查是否有待审核的注册申请
+    pending_reg = db.query(Registration).filter(
+        Registration.username == data.username,
+        Registration.status == "pending"
+    ).first()
+    if pending_reg:
         raise HTTPException(status_code=400, detail="该用户名已有待审核的注册申请")
+
+    # 删除已处理（approved/rejected）的同名注册记录，允许重新申请
+    db.query(Registration).filter(
+        Registration.username == data.username,
+        Registration.status != "pending"
+    ).delete()
 
     # 创建注册申请（保存明文密码）
     registration = Registration(
