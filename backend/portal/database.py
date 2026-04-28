@@ -30,17 +30,20 @@ def migrate_db():
     inspector = inspect(engine)
 
     # 获取 users 表的列名
-    users_columns = [col['name'] for col in inspector.get_columns('users')] if inspector.has_table('users') else []
+    if inspector.has_table('users'):
+        users_columns = [col['name'] for col in inspector.get_columns('users')]
+    else:
+        users_columns = []
 
     # 添加缺失的字段
     with engine.connect() as conn:
-        if 'users' in users_columns and 'reject_reason' not in users_columns:
+        if users_columns and 'reject_reason' not in users_columns:
             print("Adding reject_reason column to users table...")
             conn.execute(text('ALTER TABLE users ADD COLUMN reject_reason VARCHAR(255)'))
             conn.commit()
             print("Column reject_reason added successfully")
 
-        if 'users' in users_columns and 'approved_at' not in users_columns:
+        if users_columns and 'approved_at' not in users_columns:
             print("Adding approved_at column to users table...")
             conn.execute(text('ALTER TABLE users ADD COLUMN approved_at DATETIME'))
             conn.commit()
