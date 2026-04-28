@@ -3,7 +3,7 @@ Portal 接入申请管理路由 - Admin 端
 用于审核 Portal 的接入申请
 """
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
@@ -14,7 +14,7 @@ sys.path.insert(0, '/opt/wg-manager')
 
 from backend.admin.database import get_db
 from backend.admin.models import PortalApplication, PortalSite, AdminUser
-from backend.shared.auth import get_current_admin, encryption
+from backend.shared.auth import get_current_admin
 
 router = APIRouter(prefix="/api/portal-applications", tags=["Portal接入申请"])
 
@@ -23,7 +23,7 @@ class PortalApplyRequest(BaseModel):
     """Portal 发起的接入申请"""
     name: str
     url: str
-    api_key: str  # Portal 的 API 密钥，供 Admin 回调
+    key: str  # Portal 的 KEY
     description: Optional[str] = None
 
 
@@ -47,12 +47,9 @@ async def apply_portal(
     db: Session = Depends(get_db)
 ):
     """
-    Portal 发起接入申请（无需认证）
-    使用 X-Admin-API-Key 头验证
+    Portal 发起接入申请
+    Portal 使用自己的 KEY 作为认证凭证
     """
-    from fastapi import Header
-    from backend.admin.config import settings
-
     # 检查是否已存在相同 URL 的申请
     existing = db.query(PortalApplication).filter(
         PortalApplication.url == data.url
@@ -61,7 +58,7 @@ async def apply_portal(
     if existing:
         # 更新申请信息，状态重置为 pending
         existing.name = data.name
-        existing.api_key = data.api_key
+        existing.key = data.key
         existing.description = data.description
         existing.status = "pending"
         existing.reject_reason = None
@@ -75,7 +72,7 @@ async def apply_portal(
     application = PortalApplication(
         name=data.name,
         url=data.url,
-        api_key=data.api_key,
+        key=data.key,
         description=data.description,
         status="pending"
     )
@@ -154,11 +151,11 @@ async def approve_application(
     if existing_site:
         raise HTTPException(status_code=400, detail=f"已存在同名 Portal 站点: {application.name}")
 
-    # 创建 PortalSite
+    # 创建 PortalSite（KEY 明文存储）
     portal_site = PortalSite(
         name=application.name,
         url=application.url,
-        api_key=encryption.encrypt(application.api_key),
+        key=application.key,
         description=application.description,
         status="active"
     )
@@ -178,11 +175,8 @@ async def approve_application(
         async with httpx.AsyncClient() as client:
             await client.post(
                 f"{application.url.rstrip('/')}/api/admin-connection/approved",
-                json={
-                    "status": "approved",
-                    "admin_url": get_admin_url()
-                },
-                headers={"X-Portal-API-Key": application.api_key},
+                json={"status": "approved"},
+                headers={"X-Key": application.key},
                 timeout=5.0
             )
     except Exception as e:
@@ -220,11 +214,8 @@ async def reject_application(
         async with httpx.AsyncClient() as client:
             await client.post(
                 f"{application.url.rstrip('/')}/api/admin-connection/rejected",
-                json={
-                    "status": "rejected",
-                    "reject_reason": reason
-                },
-                headers={"X-Portal-API-Key": application.api_key},
+                json={"status": "rejected", "reject_reason": reason},
+                headers={"X-Key": application.key},
                 timeout=5.0
             )
     except Exception as e:
@@ -248,10 +239,3 @@ def delete_application(
     db.commit()
 
     return {"message": "申请记录已删除"}
-
-
-def get_admin_url() -> str:
-    """获取 Admin 的访问地址"""
-    import os
-    from backend.admin.config import settings
-    return os.getenv("ADMIN_URL", f"http://{settings.ADMIN_HOST}:{settings.ADMIN_PORT}")

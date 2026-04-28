@@ -21,18 +21,20 @@ class Settings(BaseSettings):
     PORTAL_HOST: str = os.getenv("PORTAL_HOST", "0.0.0.0")
     PORTAL_PORT: int = int(os.getenv("PORTAL_PORT", "8080"))
 
-    # Portal 名称和 API 密钥（用于 Admin 回调）
+    # Portal 名称
     PORTAL_NAME: str = os.getenv("PORTAL_NAME", "WireGuard Portal")
-    PORTAL_API_KEY: str = os.getenv("PORTAL_API_KEY", "")
 
     # Portal 外部访问地址（发送给 Admin）
     PORTAL_URL: str = os.getenv("PORTAL_URL", "")
 
-    # Admin 连接配置 - 从配置文件读取
-    ADMIN_URL: str = os.getenv("ADMIN_URL", "")  # Admin 地址，如 http://admin-host:8081
-    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")  # Admin 的 API 密钥
+    # 统一 KEY - 用于 Portal 与 Admin 之间的双向认证
+    # Portal 只有一个 KEY，Admin 端必须配置相同的 KEY 才能通信
+    KEY: str = os.getenv("KEY", "")
 
-    # 数据加密密钥（用于加密存储的 API Key）
+    # Admin 连接地址
+    ADMIN_URL: str = os.getenv("ADMIN_URL", "")
+
+    # 数据加密密钥
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "change-this-encryption-key-32bytes!!")
 
     class Config:

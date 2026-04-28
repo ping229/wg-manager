@@ -2,30 +2,6 @@
   <div>
     <h2>Portal 站点管理</h2>
 
-    <!-- Admin API Key -->
-    <el-card class="box-card" style="margin-bottom: 20px;">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span>Admin API Key</span>
-          <el-button type="primary" size="small" @click="showApiKey = !showApiKey">
-            {{ showApiKey ? '隐藏' : '显示' }}
-          </el-button>
-        </div>
-      </template>
-      <div v-if="showApiKey">
-        <el-input v-model="adminApiKey" readonly style="width: 400px; margin-right: 10px;">
-          <template #append>
-            <el-button @click="copyApiKey">复制</el-button>
-          </template>
-        </el-input>
-        <el-button type="warning" @click="regenerateApiKey">重新生成</el-button>
-        <p style="color: #909399; font-size: 12px; margin-top: 10px;">
-          此密钥用于 Portal 连接 Admin，请妥善保管
-        </p>
-      </div>
-      <div v-else style="color: #909399;">点击"显示"查看 API Key</div>
-    </el-card>
-
     <!-- 站点列表 -->
     <el-card>
       <template #header>
@@ -73,8 +49,8 @@
         <el-form-item label="地址" required>
           <el-input v-model="form.url" placeholder="http://portal-host:8080" />
         </el-form-item>
-        <el-form-item label="API Key" required>
-          <el-input v-model="form.api_key" placeholder="Portal 的 API 密钥" />
+        <el-form-item label="KEY" required>
+          <el-input v-model="form.key" placeholder="与 Portal 端 KEY 相同" />
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" />
@@ -101,8 +77,6 @@ import { api } from '../api'
 
 const loading = ref(false)
 const sites = ref([])
-const showApiKey = ref(false)
-const adminApiKey = ref('')
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const editId = ref(null)
@@ -110,7 +84,7 @@ const editId = ref(null)
 const form = ref({
   name: '',
   url: '',
-  api_key: '',
+  key: '',
   description: '',
   status: 'active'
 })
@@ -127,41 +101,10 @@ const loadSites = async () => {
   }
 }
 
-const loadApiKey = async () => {
-  try {
-    const res = await api.get('/api/portal-sites/admin-api-key')
-    adminApiKey.value = res.data.admin_api_key
-  } catch (error) {
-    console.error('加载 API Key 失败:', error)
-  }
-}
-
-const copyApiKey = () => {
-  navigator.clipboard.writeText(adminApiKey.value)
-  ElMessage.success('已复制到剪贴板')
-}
-
-const regenerateApiKey = async () => {
-  try {
-    await ElMessageBox.confirm(
-      '重新生成后，所有 Portal 需要更新配置才能继续连接。确定要重新生成吗？',
-      '警告',
-      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
-    )
-    const res = await api.post('/api/portal-sites/admin-api-key/regenerate')
-    adminApiKey.value = res.data.admin_api_key
-    ElMessage.success('API Key 已重新生成，请更新所有 Portal 的配置')
-  } catch (error) {
-    if (error !== 'cancel') {
-      ElMessage.error('操作失败: ' + (error.response?.data?.detail || error.message))
-    }
-  }
-}
-
 const showAddDialog = () => {
   isEdit.value = false
   editId.value = null
-  form.value = { name: '', url: '', api_key: '', description: '', status: 'active' }
+  form.value = { name: '', url: '', key: '', description: '', status: 'active' }
   dialogVisible.value = true
 }
 
@@ -171,7 +114,7 @@ const editSite = (site) => {
   form.value = {
     name: site.name,
     url: site.url,
-    api_key: '',
+    key: '',
     description: site.description || '',
     status: site.status
   }
@@ -179,7 +122,7 @@ const editSite = (site) => {
 }
 
 const saveSite = async () => {
-  if (!form.value.name || !form.value.url || !form.value.api_key) {
+  if (!form.value.name || !form.value.url || !form.value.key) {
     ElMessage.warning('请填写必填项')
     return
   }
@@ -231,6 +174,5 @@ const deleteSite = async (site) => {
 
 onMounted(() => {
   loadSites()
-  loadApiKey()
 })
 </script>

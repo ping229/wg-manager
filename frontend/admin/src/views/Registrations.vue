@@ -71,6 +71,7 @@ const statusFilter = ref('pending')
 const rejectDialogVisible = ref(false)
 
 const rejectForm = reactive({
+  portal_site_id: null,
   id: null,
   reason: ''
 })
@@ -100,15 +101,18 @@ async function fetchRegistrations() {
 async function approve(reg) {
   try {
     await ElMessageBox.confirm('确定通过此注册申请吗?', '确认', { type: 'info' })
-    await api.post(`/api/registrations/${reg.id}/approve`)
+    await api.post(`/api/registrations/${reg.portal_site_id}/${reg.id}/approve`)
     ElMessage.success('已通过')
     fetchRegistrations()
   } catch (error) {
-    if (error !== 'cancel') console.error(error)
+    if (error !== 'cancel') {
+      ElMessage.error('操作失败: ' + (error.response?.data?.detail || error.message))
+    }
   }
 }
 
 function showRejectDialog(reg) {
+  rejectForm.portal_site_id = reg.portal_site_id
   rejectForm.id = reg.id
   rejectForm.reason = ''
   rejectDialogVisible.value = true
@@ -122,10 +126,12 @@ async function reject() {
 
   submitting.value = true
   try {
-    await api.post(`/api/registrations/${rejectForm.id}/reject`, { reason: rejectForm.reason })
+    await api.post(`/api/registrations/${rejectForm.portal_site_id}/${rejectForm.id}/reject`, { reason: rejectForm.reason })
     ElMessage.success('已拒绝')
     rejectDialogVisible.value = false
     fetchRegistrations()
+  } catch (error) {
+    ElMessage.error('操作失败: ' + (error.response?.data?.detail || error.message))
   } finally {
     submitting.value = false
   }

@@ -6,13 +6,12 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 import httpx
-import secrets
 
 import sys
 sys.path.insert(0, '/opt/wg-manager')
 
 from backend.admin.database import get_db
-from backend.admin.models import PortalSite, AdminUser
+from backend.admin.models import PortalSite, AdminUser, Peer
 from backend.shared.auth import get_current_admin
 
 router = APIRouter(prefix="/api/portal-sites", tags=["Portal站点管理"])
@@ -21,29 +20,16 @@ router = APIRouter(prefix="/api/portal-sites", tags=["Portal站点管理"])
 class PortalSiteCreate(BaseModel):
     name: str
     url: str
-    api_key: str
+    key: str
     description: Optional[str] = None
 
 
 class PortalSiteUpdate(BaseModel):
     name: Optional[str] = None
     url: Optional[str] = None
-    api_key: Optional[str] = None
+    key: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
-
-
-class PortalSiteResponse(BaseModel):
-    id: int
-    name: str
-    url: str
-    description: Optional[str] = None
-    status: str
-    online: bool = False
-    created_at: str
-
-    class Config:
-        from_attributes = True
 
 
 @router.get("")
@@ -62,7 +48,7 @@ async def list_portal_sites(
             async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{site.url.rstrip('/')}/health",
-                    headers={"X-Admin-API-Key": site.api_key},
+                    headers={"X-Key": site.key},
                     timeout=3.0
                 )
                 online = response.status_code == 200
@@ -92,11 +78,10 @@ def create_portal_site(
     if db.query(PortalSite).filter(PortalSite.name == data.name).first():
         raise HTTPException(status_code=400, detail="站点名称已存在")
 
-    # Portal API Key 明文存储（只是调用凭证，不需要加密）
     site = PortalSite(
         name=data.name,
         url=data.url,
-        api_key=data.api_key,
+        key=data.key,
         description=data.description,
         status="active"
     )
@@ -138,8 +123,8 @@ def update_portal_site(
     if data.url is not None:
         site.url = data.url
 
-    if data.api_key is not None:
-        site.api_key = data.api_key  # 明文存储
+    if data.key is not None:
+        site.key = data.key
 
     if data.description is not None:
         site.description = data.description
@@ -167,8 +152,6 @@ def delete_portal_site(
     current_admin: AdminUser = Depends(get_current_admin)
 ):
     """删除 Portal 站点"""
-    from backend.admin.models import Peer
-
     site = db.query(PortalSite).filter(PortalSite.id == site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="站点不存在")
@@ -202,7 +185,7 @@ async def test_portal_site(
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{site.url.rstrip('/')}/health",
-                headers={"X-Admin-API-Key": site.api_key},
+                headers={"X-Key": site.key},
                 timeout=5.0
             )
             if response.status_code == 200:
@@ -213,43 +196,3 @@ async def test_portal_site(
         return {"success": False, "message": f"连接失败: {str(e)}"}
     except Exception as e:
         return {"success": False, "message": f"错误: {str(e)}"}
-
-
-# ============ Admin API Key 管理 ============
-
-from backend.admin.models import AdminSetting
-
-
-@router.get("/admin-api-key")
-def get_admin_api_key(
-    db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin)
-):
-    """获取 Admin API Key（用于 Portal 连接 Admin）"""
-    setting = db.query(AdminSetting).filter(AdminSetting.key == "admin_api_key").first()
-    if not setting:
-        # 自动生成一个
-        api_key = secrets.token_hex(16)
-        setting = AdminSetting(key="admin_api_key", value=api_key)
-        db.add(setting)
-        db.commit()
-
-    return {"admin_api_key": setting.value}
-
-
-@router.post("/admin-api-key/regenerate")
-def regenerate_admin_api_key(
-    db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin)
-):
-    """重新生成 Admin API Key"""
-    new_key = secrets.token_hex(16)
-    setting = db.query(AdminSetting).filter(AdminSetting.key == "admin_api_key").first()
-    if setting:
-        setting.value = new_key
-    else:
-        setting = AdminSetting(key="admin_api_key", value=new_key)
-        db.add(setting)
-    db.commit()
-
-    return {"admin_api_key": new_key, "message": "API Key 已重新生成，请更新所有 Portal 的配置"}

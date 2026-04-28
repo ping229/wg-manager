@@ -205,7 +205,7 @@ generate_config() {
     # 生成随机密钥
     local secret_key=$(openssl rand -hex 32)
     local encryption_key=$(openssl rand -hex 16)
-    local portal_api_key=$(openssl rand -hex 16)
+    local key=$(openssl rand -hex 16)
 
     if [[ $DEPLOY_MODE == "portal" ]]; then
         cat > "$env_file" << EOF
@@ -221,9 +221,6 @@ ENCRYPTION_KEY=${encryption_key}
 # Portal 名称 (发送给 Admin 显示)
 PORTAL_NAME=WireGuard Portal
 
-# Portal API 密钥 (供 Admin 回调)
-PORTAL_API_KEY=${portal_api_key}
-
 # Portal 外部访问地址 (用于 Admin 回调)
 # PORTAL_URL=http://your-portal-host:8080
 
@@ -234,10 +231,13 @@ PORTAL_PORT=8080
 # 数据库
 DATABASE_URL=sqlite:///${INSTALL_DIR}/data/portal.db
 
-# ============ Admin 连接配置 (必填) ============
-# 请修改为实际的 Admin 地址和 API 密钥
+# ============ KEY (必填) ============
+# KEY 用于 Portal 与 Admin 之间的双向认证
+# 必须与 Admin 端配置的 Portal KEY 相同
+KEY=${key}
+
+# Admin 连接地址
 ADMIN_URL=http://admin-host:8081
-ADMIN_API_KEY=please-change-this-to-admin-api-key
 EOF
     elif [[ $DEPLOY_MODE == "admin" ]]; then
         cat > "$env_file" << EOF
@@ -259,6 +259,9 @@ ADMIN_PORT=8081
 
 # 数据库
 DATABASE_URL=sqlite:///${INSTALL_DIR}/data/admin.db
+
+# 注意：Admin 端不配置 KEY，而是在"Portal 站点管理"中为每个 Portal 配置 KEY
+# 每个 Portal 的 KEY 必须与对应 Portal 端的 KEY 相同
 EOF
     else
         # all 模式
@@ -276,8 +279,8 @@ ENCRYPTION_KEY=${encryption_key}
 # Portal 名称
 PORTAL_NAME=WireGuard Portal
 
-# Portal API 密钥
-PORTAL_API_KEY=${portal_api_key}
+# KEY - Portal 与 Admin 之间通信的密钥
+KEY=${key}
 
 # 超级管理员初始密码
 SUPER_ADMIN_PASSWORD=admin123
@@ -289,10 +292,6 @@ PORTAL_PORT=8080
 # Admin 服务配置
 ADMIN_HOST=127.0.0.1
 ADMIN_PORT=8081
-
-# Admin 连接配置 (Portal 连接本地 Admin)
-ADMIN_URL=http://127.0.0.1:8081
-ADMIN_API_KEY=${portal_api_key}
 
 # Agent 服务配置
 AGENT_HOST=127.0.0.1
@@ -315,10 +314,10 @@ EOF
         log_warn "============================================"
         log_warn ""
         log_warn "请编辑 .env 文件，修改以下配置："
-        log_warn "  ADMIN_URL    - Admin 后台地址"
-        log_warn "  ADMIN_API_KEY - Admin API 密钥"
+        log_warn "  ADMIN_URL - Admin 后台地址"
+        log_warn "  KEY       - 与 Admin 端配置的 KEY 相同"
         log_warn ""
-        log_warn "然后启动服务，访问 Portal 首页点击'申请接入'"
+        log_warn "然后在 Admin 的'Portal 站点管理'中添加此 Portal"
         log_warn ""
     elif [[ $DEPLOY_MODE == "admin" ]]; then
         log_info ""
@@ -326,7 +325,7 @@ EOF
         log_info "  1. 启动服务: systemctl start wg-admin"
         log_info "  2. 访问后台: http://HOST:8081"
         log_info "  3. 默认账号: admin / admin123"
-        log_info "  4. 在'Portal接入管理'中审核 Portal 申请"
+        log_info "  4. 在'Portal 站点管理'中添加 Portal（KEY 需与 Portal 端相同）"
         log_info ""
     fi
 }

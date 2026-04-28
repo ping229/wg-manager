@@ -35,6 +35,12 @@ def migrate_db():
     else:
         portal_sites_columns = []
 
+    # 获取 portal_applications 表的列名
+    if inspector.has_table('portal_applications'):
+        portal_applications_columns = [col['name'] for col in inspector.get_columns('portal_applications')]
+    else:
+        portal_applications_columns = []
+
     # 获取 peers 表的列名
     if inspector.has_table('peers'):
         peers_columns = [col['name'] for col in inspector.get_columns('peers')]
@@ -42,25 +48,45 @@ def migrate_db():
         peers_columns = []
 
     with engine.connect() as conn:
-        # portal_sites 表迁移
-        if 'portal_sites' in portal_sites_columns and 'api_key' not in portal_sites_columns:
-            print("Adding api_key column to portal_sites table...")
-            conn.execute(text('ALTER TABLE portal_sites ADD COLUMN api_key VARCHAR(100) NOT NULL DEFAULT ""'))
-            conn.commit()
-            print("Column api_key added successfully")
+        # portal_sites 表迁移: api_key -> key
+        if portal_sites_columns:
+            if 'api_key' in portal_sites_columns and 'key' not in portal_sites_columns:
+                print("Renaming api_key to key in portal_sites table...")
+                conn.execute(text('ALTER TABLE portal_sites RENAME COLUMN api_key TO key'))
+                conn.commit()
+                print("Column renamed successfully")
+            elif 'key' not in portal_sites_columns and 'api_key' not in portal_sites_columns:
+                print("Adding key column to portal_sites table...")
+                conn.execute(text('ALTER TABLE portal_sites ADD COLUMN key VARCHAR(100) NOT NULL DEFAULT ""'))
+                conn.commit()
+                print("Column key added successfully")
+
+        # portal_applications 表迁移: api_key -> key
+        if portal_applications_columns:
+            if 'api_key' in portal_applications_columns and 'key' not in portal_applications_columns:
+                print("Renaming api_key to key in portal_applications table...")
+                conn.execute(text('ALTER TABLE portal_applications RENAME COLUMN api_key TO key'))
+                conn.commit()
+                print("Column renamed successfully")
+            elif 'key' not in portal_applications_columns and 'api_key' not in portal_applications_columns:
+                print("Adding key column to portal_applications table...")
+                conn.execute(text('ALTER TABLE portal_applications ADD COLUMN key VARCHAR(100) NOT NULL DEFAULT ""'))
+                conn.commit()
+                print("Column key added successfully")
 
         # peers 表迁移
-        if 'peers' in peers_columns and 'portal_site_id' not in peers_columns:
-            print("Adding portal_site_id column to peers table...")
-            conn.execute(text('ALTER TABLE peers ADD COLUMN portal_site_id INTEGER'))
-            conn.commit()
-            print("Column portal_site_id added successfully")
+        if peers_columns:
+            if 'portal_site_id' not in peers_columns:
+                print("Adding portal_site_id column to peers table...")
+                conn.execute(text('ALTER TABLE peers ADD COLUMN portal_site_id INTEGER'))
+                conn.commit()
+                print("Column portal_site_id added successfully")
 
-        if 'peers' in peers_columns and 'username' not in peers_columns:
-            print("Adding username column to peers table...")
-            conn.execute(text('ALTER TABLE peers ADD COLUMN username VARCHAR(50)'))
-            conn.commit()
-            print("Column username added successfully")
+            if 'username' not in peers_columns:
+                print("Adding username column to peers table...")
+                conn.execute(text('ALTER TABLE peers ADD COLUMN username VARCHAR(50)'))
+                conn.commit()
+                print("Column username added successfully")
 
 
 def init_db():

@@ -6,13 +6,13 @@ from backend.admin.config import settings
 class PortalClient:
     """Portal API 客户端 - Admin 用于调用指定 Portal 服务"""
 
-    def __init__(self, url: str = None, api_key: str = None):
+    def __init__(self, url: str = None, key: str = None):
         self.base_url = (url or settings.PORTAL_URL).rstrip('/')
-        self.api_key = api_key or settings.PORTAL_API_KEY
+        self.key = key
         self.timeout = 10.0
 
     def _get_headers(self) -> dict:
-        return {"X-Admin-API-Key": self.api_key} if self.api_key else {}
+        return {"X-Key": self.key} if self.key else {}
 
     async def _request(self, method: str, endpoint: str, data: dict = None) -> dict:
         """发送请求到 Portal API"""
@@ -107,7 +107,5 @@ class PortalClient:
 
 def get_portal_client(portal_site) -> PortalClient:
     """根据 Portal 站点配置创建客户端"""
-    # Portal API Key 是调用凭证，明文存储即可（不需要加密）
-    # 因为 Portal 和 Admin 独立部署，ENCRYPTION_KEY 不同
-    api_key = portal_site.api_key or ""
-    return PortalClient(url=portal_site.url, api_key=api_key)
+    key = portal_site.key or ""
+    return PortalClient(url=portal_site.url, key=key)

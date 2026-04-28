@@ -33,7 +33,7 @@ class PortalApplication(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)  # Portal 名称
     url = Column(String(255), nullable=False)  # Portal 地址
-    api_key = Column(String(100), nullable=False)  # Portal 的 API 密钥
+    key = Column(String(100), nullable=False)  # Portal 的 KEY
     description = Column(Text, nullable=True)  # 申请说明
     status = Column(String(20), default="pending")  # pending, approved, rejected
     reject_reason = Column(String(255), nullable=True)
@@ -52,7 +52,7 @@ class PortalSite(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), unique=True, nullable=False)
     url = Column(String(255), nullable=False)
-    api_key = Column(String(100), nullable=False)  # Portal 的 API 密钥（加密存储）
+    key = Column(String(100), nullable=False)  # Portal 的 KEY（与 Portal 端 KEY 相同）
     description = Column(Text, nullable=True)
     status = Column(String(20), default="active")  # active, disabled
     created_at = Column(DateTime, default=datetime.utcnow)

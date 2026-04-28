@@ -126,19 +126,19 @@ def get_registration_status(
 
 # ============ Admin API - 供 Admin 调用 ============
 
-def verify_admin_api_key(api_key: Optional[str] = Header(None, alias="X-Admin-API-Key")):
-    """验证 Admin API 密钥"""
-    if not settings.PORTAL_API_KEY:
-        raise HTTPException(status_code=500, detail="Portal API 密钥未配置")
-    if api_key != settings.PORTAL_API_KEY:
-        raise HTTPException(status_code=403, detail="无效的 API 密钥")
+def verify_key(key: Optional[str] = Header(None, alias="X-Key")):
+    """验证 KEY"""
+    if not settings.KEY:
+        raise HTTPException(status_code=500, detail="KEY 未配置")
+    if key != settings.KEY:
+        raise HTTPException(status_code=403, detail="无效的 KEY")
     return True
 
 
 @router.get("/admin/users")
 def admin_list_users(
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 获取用户列表"""
     users = db.query(User).all()
@@ -156,7 +156,7 @@ def admin_list_users(
 def admin_list_registrations(
     status_filter: str = None,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 获取注册申请列表"""
     query = db.query(Registration)
@@ -177,7 +177,7 @@ def admin_list_registrations(
 def admin_approve_registration(
     reg_id: int,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 批准注册申请"""
     registration = db.query(Registration).filter(Registration.id == reg_id).first()
@@ -211,7 +211,7 @@ def admin_reject_registration(
     reg_id: int,
     reason: str = "",
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 拒绝注册申请"""
     registration = db.query(Registration).filter(Registration.id == reg_id).first()
@@ -234,7 +234,7 @@ def admin_reject_registration(
 def admin_get_user(
     user_id: int,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 获取用户详情"""
     user = db.query(User).filter(User.id == user_id).first()
@@ -256,7 +256,7 @@ def admin_update_user_status(
     user_id: int,
     status: str,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 更新用户状态"""
     user = db.query(User).filter(User.id == user_id).first()
@@ -299,7 +299,7 @@ class BatchUserDelete(BaseModel):
 def admin_create_user(
     data: UserCreate,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 创建用户"""
     # 检查用户名是否已存在
@@ -334,7 +334,7 @@ def admin_create_user(
 def admin_batch_create_users(
     data: BatchUserCreate,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 批量创建用户"""
     created = []
@@ -395,7 +395,7 @@ def admin_batch_create_users(
 def admin_delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 删除用户"""
     user = db.query(User).filter(User.id == user_id).first()
@@ -413,7 +413,7 @@ def admin_delete_user(
 def admin_batch_delete_users(
     data: BatchUserDelete,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_api_key)
+    _: bool = Depends(verify_key)
 ):
     """Admin 批量删除用户"""
     deleted = []
