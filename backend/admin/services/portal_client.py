@@ -73,6 +73,27 @@ class PortalClient:
         """拒绝注册申请"""
         return await self._request("POST", f"/api/auth/admin/reject/{reg_id}?reason={reason}")
 
+    # 用户创建/删除
+    async def create_user(self, username: str, password: str, email: str) -> Dict:
+        """创建用户"""
+        return await self._request("POST", "/api/auth/admin/users/create", {
+            "username": username,
+            "password": password,
+            "email": email
+        })
+
+    async def batch_create_users(self, users: List[Dict]) -> Dict:
+        """批量创建用户"""
+        return await self._request("POST", "/api/auth/admin/users/batch-create", {"users": users})
+
+    async def delete_user(self, user_id: int) -> Dict:
+        """删除用户"""
+        return await self._request("DELETE", f"/api/auth/admin/user/{user_id}")
+
+    async def batch_delete_users(self, user_ids: List[int]) -> Dict:
+        """批量删除用户"""
+        return await self._request("POST", "/api/auth/admin/users/batch-delete", {"user_ids": user_ids})
+
     # 健康检查
     async def health_check(self) -> bool:
         """检查 Portal 是否在线"""

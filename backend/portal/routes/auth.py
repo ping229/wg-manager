@@ -270,3 +270,170 @@ def admin_update_user_status(
     db.commit()
 
     return {"message": f"用户状态已更新为 {status}"}
+
+
+# ============ 用户创建/删除 API ============
+
+from pydantic import BaseModel, EmailStr
+from typing import List
+
+
+class UserCreate(BaseModel):
+    """创建用户请求"""
+    username: str
+    password: str
+    email: EmailStr
+
+
+class BatchUserCreate(BaseModel):
+    """批量创建用户请求"""
+    users: List[UserCreate]
+
+
+class BatchUserDelete(BaseModel):
+    """批量删除用户请求"""
+    user_ids: List[int]
+
+
+@router.post("/admin/users/create")
+def admin_create_user(
+    data: UserCreate,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 创建用户"""
+    # 检查用户名是否已存在
+    if db.query(User).filter(User.username == data.username).first():
+        raise HTTPException(status_code=400, detail="用户名已存在")
+
+    # 检查邮箱是否已存在
+    if db.query(User).filter(User.email == data.email).first():
+        raise HTTPException(status_code=400, detail="邮箱已被使用")
+
+    # 创建用户
+    user = User(
+        username=data.username,
+        password_hash=get_password_hash(data.password),
+        email=data.email,
+        status="active",
+        approved_at=datetime.utcnow()
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "用户创建成功",
+        "user_id": user.id,
+        "username": user.username,
+        "email": user.email
+    }
+
+
+@router.post("/admin/users/batch-create")
+def admin_batch_create_users(
+    data: BatchUserCreate,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 批量创建用户"""
+    created = []
+    failed = []
+
+    for user_data in data.users:
+        try:
+            # 检查用户名是否已存在
+            if db.query(User).filter(User.username == user_data.username).first():
+                failed.append({
+                    "username": user_data.username,
+                    "email": user_data.email,
+                    "reason": "用户名已存在"
+                })
+                continue
+
+            # 检查邮箱是否已存在
+            if db.query(User).filter(User.email == user_data.email).first():
+                failed.append({
+                    "username": user_data.username,
+                    "email": user_data.email,
+                    "reason": "邮箱已被使用"
+                })
+                continue
+
+            # 创建用户
+            user = User(
+                username=user_data.username,
+                password_hash=get_password_hash(user_data.password),
+                email=user_data.email,
+                status="active",
+                approved_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.flush()  # 获取 ID
+            created.append({
+                "user_id": user.id,
+                "username": user.username,
+                "email": user.email
+            })
+        except Exception as e:
+            failed.append({
+                "username": user_data.username,
+                "email": user_data.email,
+                "reason": str(e)
+            })
+
+    db.commit()
+
+    return {
+        "message": f"成功创建 {len(created)} 个用户，失败 {len(failed)} 个",
+        "created": created,
+        "failed": failed
+    }
+
+
+@router.delete("/admin/user/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 删除用户"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    username = user.username
+    db.delete(user)
+    db.commit()
+
+    return {"message": f"用户 {username} 已删除"}
+
+
+@router.post("/admin/users/batch-delete")
+def admin_batch_delete_users(
+    data: BatchUserDelete,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin_api_key)
+):
+    """Admin 批量删除用户"""
+    deleted = []
+    not_found = []
+
+    for user_id in data.user_ids:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            deleted.append({
+                "user_id": user.id,
+                "username": user.username
+            })
+            db.delete(user)
+        else:
+            not_found.append(user_id)
+
+    db.commit()
+
+    return {
+        "message": f"成功删除 {len(deleted)} 个用户",
+        "deleted": deleted,
+        "not_found": not_found
+    }

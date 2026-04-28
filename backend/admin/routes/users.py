@@ -1,5 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, EmailStr
+from typing import List, Optional
+import httpx
 
 import sys
 sys.path.insert(0, '/opt/wg-manager')
@@ -12,6 +15,26 @@ from backend.admin.services.portal_client import get_portal_client
 router = APIRouter(prefix="/api/users", tags=["用户管理"])
 
 
+# ============ 请求模型 ============
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    email: EmailStr
+
+
+class BatchUserCreate(BaseModel):
+    portal_site_id: int
+    users: List[UserCreate]
+
+
+class BatchUserDelete(BaseModel):
+    portal_site_id: int
+    user_ids: List[int]
+
+
+# ============ 用户列表 ============
+
 @router.get("")
 async def list_users(
     portal_site_id: int = Query(None, description="Portal站点ID"),
@@ -20,7 +43,6 @@ async def list_users(
     db: Session = Depends(get_db)
 ):
     """获取用户列表"""
-    # 获取所有 Portal 站点
     portal_sites = db.query(PortalSite).filter(PortalSite.status == "active").all()
 
     if not portal_sites:
@@ -28,7 +50,6 @@ async def list_users(
 
     all_users = []
 
-    # 如果指定了 portal_site_id，只查询该站点
     if portal_site_id:
         portal_sites = [s for s in portal_sites if s.id == portal_site_id]
 
@@ -41,7 +62,6 @@ async def list_users(
                 user["portal_site_id"] = site.id
                 user["portal_site_name"] = site.name
 
-                # 获取 Peer 信息
                 peer = db.query(Peer).filter(
                     Peer.portal_site_id == site.id,
                     Peer.portal_user_id == user["id"]
@@ -61,16 +81,111 @@ async def list_users(
 
                 all_users.append(user)
         except Exception as e:
-            # 跳过连接失败的站点
             print(f"Failed to get users from {site.name}: {e}")
             continue
 
-    # 按状态过滤
     if status:
         all_users = [u for u in all_users if u.get("status") == status]
 
     return all_users
 
+
+# ============ 创建用户 ============
+
+@router.post("/create")
+async def create_user(
+    portal_site_id: int = Body(...),
+    username: str = Body(...),
+    password: str = Body(...),
+    email: str = Body(...),
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """创建用户"""
+    site = db.query(PortalSite).filter(PortalSite.id == portal_site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Portal站点不存在")
+
+    try:
+        client = get_portal_client(site)
+        result = await client.create_user(username, password, email)
+        result["portal_site_id"] = site.id
+        result["portal_site_name"] = site.name
+        return result
+    except Exception as e:
+        if "已存在" in str(e):
+            raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/batch-create")
+async def batch_create_users(
+    data: BatchUserCreate,
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """批量创建用户"""
+    site = db.query(PortalSite).filter(PortalSite.id == data.portal_site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Portal站点不存在")
+
+    try:
+        client = get_portal_client(site)
+        users_data = [u.model_dump() for u in data.users]
+        result = await client.batch_create_users(users_data)
+        result["portal_site_id"] = site.id
+        result["portal_site_name"] = site.name
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ 删除用户 ============
+
+@router.delete("/{portal_site_id}/{user_id}")
+async def delete_user(
+    portal_site_id: int,
+    user_id: int,
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """删除用户"""
+    site = db.query(PortalSite).filter(PortalSite.id == portal_site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Portal站点不存在")
+
+    try:
+        client = get_portal_client(site)
+        result = await client.delete_user(user_id)
+        return result
+    except Exception as e:
+        if "不存在" in str(e):
+            raise HTTPException(status_code=404, detail="用户不存在")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/batch-delete")
+async def batch_delete_users(
+    data: BatchUserDelete,
+    current_admin: AdminUser = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """批量删除用户"""
+    site = db.query(PortalSite).filter(PortalSite.id == data.portal_site_id).first()
+    if not site:
+        raise HTTPException(status_code=404, detail="Portal站点不存在")
+
+    try:
+        client = get_portal_client(site)
+        result = await client.batch_delete_users(data.user_ids)
+        result["portal_site_id"] = site.id
+        result["portal_site_name"] = site.name
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ 用户详情 ============
 
 @router.get("/{portal_site_id}/{user_id}")
 async def get_user(
@@ -90,7 +205,6 @@ async def get_user(
         user["portal_site_id"] = site.id
         user["portal_site_name"] = site.name
 
-        # 获取 Peer 信息
         peer = db.query(Peer).filter(
             Peer.portal_site_id == site.id,
             Peer.portal_user_id == user_id
@@ -115,6 +229,8 @@ async def get_user(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============ 用户状态管理 ============
+
 @router.post("/{portal_site_id}/{user_id}/disable")
 async def disable_user(
     portal_site_id: int,
@@ -123,8 +239,6 @@ async def disable_user(
     db: Session = Depends(get_db)
 ):
     """禁用用户"""
-    import httpx
-
     site = db.query(PortalSite).filter(PortalSite.id == portal_site_id).first()
     if not site:
         raise HTTPException(status_code=404, detail="Portal站点不存在")
@@ -189,8 +303,6 @@ async def delete_user_peer(
     db: Session = Depends(get_db)
 ):
     """删除用户的 Peer 配置"""
-    import httpx
-
     peer = db.query(Peer).filter(
         Peer.portal_site_id == portal_site_id,
         Peer.portal_user_id == user_id
@@ -199,7 +311,6 @@ async def delete_user_peer(
     if not peer:
         raise HTTPException(status_code=404, detail="该用户没有 Peer 配置")
 
-    # 从 Agent 删除 Peer
     node = db.query(Node).filter(Node.id == peer.node_id).first()
     if node:
         try:
