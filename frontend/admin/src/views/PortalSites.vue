@@ -1,0 +1,236 @@
+<template>
+  <div>
+    <h2>Portal 站点管理</h2>
+
+    <!-- Admin API Key -->
+    <el-card class="box-card" style="margin-bottom: 20px;">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>Admin API Key</span>
+          <el-button type="primary" size="small" @click="showApiKey = !showApiKey">
+            {{ showApiKey ? '隐藏' : '显示' }}
+          </el-button>
+        </div>
+      </template>
+      <div v-if="showApiKey">
+        <el-input v-model="adminApiKey" readonly style="width: 400px; margin-right: 10px;">
+          <template #append>
+            <el-button @click="copyApiKey">复制</el-button>
+          </template>
+        </el-input>
+        <el-button type="warning" @click="regenerateApiKey">重新生成</el-button>
+        <p style="color: #909399; font-size: 12px; margin-top: 10px;">
+          此密钥用于 Portal 连接 Admin，请妥善保管
+        </p>
+      </div>
+      <div v-else style="color: #909399;">点击"显示"查看 API Key</div>
+    </el-card>
+
+    <!-- 站点列表 -->
+    <el-card>
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span>已接入的 Portal 站点</span>
+          <el-button type="primary" @click="showAddDialog">添加站点</el-button>
+        </div>
+      </template>
+
+      <el-table :data="sites" v-loading="loading">
+        <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column prop="name" label="名称" />
+        <el-table-column prop="url" label="地址" />
+        <el-table-column prop="description" label="描述" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.status === 'active' ? 'success' : 'info'">
+              {{ row.status === 'active' ? '正常' : '禁用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="在线" width="80">
+          <template #default="{ row }">
+            <el-tag :type="row.online ? 'success' : 'danger'" size="small">
+              {{ row.online ? '在线' : '离线' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="200">
+          <template #default="{ row }">
+            <el-button size="small" @click="testConnection(row)">测试</el-button>
+            <el-button size="small" type="primary" @click="editSite(row)">编辑</el-button>
+            <el-button size="small" type="danger" @click="deleteSite(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <!-- 添加/编辑对话框 -->
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑站点' : '添加站点'" width="500px">
+      <el-form :model="form" label-width="100px">
+        <el-form-item label="名称" required>
+          <el-input v-model="form.name" placeholder="站点名称" />
+        </el-form-item>
+        <el-form-item label="地址" required>
+          <el-input v-model="form.url" placeholder="http://portal-host:8080" />
+        </el-form-item>
+        <el-form-item label="API Key" required>
+          <el-input v-model="form.api_key" placeholder="Portal 的 API 密钥" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="form.description" type="textarea" />
+        </el-form-item>
+        <el-form-item label="状态" v-if="isEdit">
+          <el-select v-model="form.status">
+            <el-option label="正常" value="active" />
+            <el-option label="禁用" value="disabled" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="saveSite">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { api } from '../api'
+
+const loading = ref(false)
+const sites = ref([])
+const showApiKey = ref(false)
+const adminApiKey = ref('')
+const dialogVisible = ref(false)
+const isEdit = ref(false)
+const editId = ref(null)
+
+const form = ref({
+  name: '',
+  url: '',
+  api_key: '',
+  description: '',
+  status: 'active'
+})
+
+const loadSites = async () => {
+  loading.value = true
+  try {
+    const res = await api.get('/portal-sites')
+    sites.value = res.data
+  } catch (error) {
+    ElMessage.error('加载失败: ' + (error.response?.data?.detail || error.message))
+  } finally {
+    loading.value = false
+  }
+}
+
+const loadApiKey = async () => {
+  try {
+    const res = await api.get('/portal-sites/admin-api-key')
+    adminApiKey.value = res.data.admin_api_key
+  } catch (error) {
+    console.error('加载 API Key 失败:', error)
+  }
+}
+
+const copyApiKey = () => {
+  navigator.clipboard.writeText(adminApiKey.value)
+  ElMessage.success('已复制到剪贴板')
+}
+
+const regenerateApiKey = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '重新生成后，所有 Portal 需要更新配置才能继续连接。确定要重新生成吗？',
+      '警告',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    const res = await api.post('/portal-sites/admin-api-key/regenerate')
+    adminApiKey.value = res.data.admin_api_key
+    ElMessage.success('API Key 已重新生成，请更新所有 Portal 的配置')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('操作失败: ' + (error.response?.data?.detail || error.message))
+    }
+  }
+}
+
+const showAddDialog = () => {
+  isEdit.value = false
+  editId.value = null
+  form.value = { name: '', url: '', api_key: '', description: '', status: 'active' }
+  dialogVisible.value = true
+}
+
+const editSite = (site) => {
+  isEdit.value = true
+  editId.value = site.id
+  form.value = {
+    name: site.name,
+    url: site.url,
+    api_key: '',
+    description: site.description || '',
+    status: site.status
+  }
+  dialogVisible.value = true
+}
+
+const saveSite = async () => {
+  if (!form.value.name || !form.value.url || !form.value.api_key) {
+    ElMessage.warning('请填写必填项')
+    return
+  }
+
+  try {
+    if (isEdit.value) {
+      await api.put(`/portal-sites/${editId.value}`, form.value)
+      ElMessage.success('更新成功')
+    } else {
+      await api.post('/portal-sites', form.value)
+      ElMessage.success('添加成功')
+    }
+    dialogVisible.value = false
+    loadSites()
+  } catch (error) {
+    ElMessage.error('保存失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+const testConnection = async (site) => {
+  try {
+    const res = await api.post(`/portal-sites/${site.id}/test`)
+    if (res.data.success) {
+      ElMessage.success('连接成功')
+    } else {
+      ElMessage.error('连接失败: ' + res.data.message)
+    }
+  } catch (error) {
+    ElMessage.error('测试失败: ' + (error.response?.data?.detail || error.message))
+  }
+}
+
+const deleteSite = async (site) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除站点 "${site.name}" 吗？`,
+      '确认删除',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    await api.delete(`/portal-sites/${site.id}`)
+    ElMessage.success('删除成功')
+    loadSites()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败: ' + (error.response?.data?.detail || error.message))
+    }
+  }
+}
+
+onMounted(() => {
+  loadSites()
+  loadApiKey()
+})
+</script>

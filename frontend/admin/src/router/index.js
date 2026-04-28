@@ -39,6 +39,11 @@ const routes = [
         component: () => import('../views/Admins.vue')
       },
       {
+        path: 'portal-sites',
+        name: 'PortalSites',
+        component: () => import('../views/PortalSites.vue')
+      },
+      {
         path: 'audit',
         name: 'Audit',
         component: () => import('../views/Audit.vue')

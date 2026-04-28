@@ -28,6 +28,10 @@
           <el-icon><Document /></el-icon>
           <span>注册审批</span>
         </el-menu-item>
+        <el-menu-item index="/portal-sites">
+          <el-icon><Connection /></el-icon>
+          <span>Portal 站点</span>
+        </el-menu-item>
         <el-menu-item index="/admins" v-if="authStore.isSuperAdmin">
           <el-icon><UserFilled /></el-icon>
           <span>管理员</span>
