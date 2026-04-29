@@ -51,7 +51,8 @@ async function handleLogin() {
     loading.value = true
     await authStore.login(form.username, form.password)
     ElMessage.success('登录成功')
-    router.push('/')
+    // 使用 replace 避免返回到登录页
+    await router.replace('/')
   } catch (error) {
     if (error.response) {
       const status = error.response.status
@@ -65,8 +66,12 @@ async function handleLogin() {
       } else {
         ElMessage.error(detail)
       }
-    } else {
+    } else if (error.request) {
       ElMessage.error('网络错误，请检查网络连接')
+    } else {
+      // 导航错误或其他错误
+      console.error('Login error:', error)
+      ElMessage.error('登录失败，请稍后重试')
     }
   } finally {
     loading.value = false

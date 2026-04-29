@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "change-this-encryption-key-32bytes!!")
 
     class Config:
-        env_file = ".env"
+        env_file = "/opt/wg-manager/.env"
         extra = "ignore"
 
 

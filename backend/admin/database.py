@@ -88,6 +88,12 @@ def migrate_db():
                 conn.commit()
                 print("Column username added successfully")
 
+            if 'portal_user_id' not in peers_columns:
+                print("Adding portal_user_id column to peers table...")
+                conn.execute(text('ALTER TABLE peers ADD COLUMN portal_user_id INTEGER'))
+                conn.commit()
+                print("Column portal_user_id added successfully")
+
 
 def init_db():
     """初始化数据库表"""
