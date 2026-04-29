@@ -53,7 +53,21 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     router.push('/')
   } catch (error) {
-    console.error(error)
+    if (error.response) {
+      const status = error.response.status
+      const detail = error.response.data?.detail || '登录失败'
+      if (status === 404) {
+        ElMessage.error('该账户尚未注册，请先注册账户')
+      } else if (status === 403) {
+        ElMessage.error(detail)
+      } else if (status === 401) {
+        ElMessage.error('密码错误')
+      } else {
+        ElMessage.error(detail)
+      }
+    } else {
+      ElMessage.error('网络错误，请检查网络连接')
+    }
   } finally {
     loading.value = false
   }

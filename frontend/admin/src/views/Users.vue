@@ -4,16 +4,22 @@
       <template #header>
         <div class="card-header">
           <div class="left-actions">
-            <el-select v-model="selectedPortalSite" placeholder="选择Portal站点" @change="fetchUsers" style="width: 200px;">
+            <el-select v-model="selectedPortalSite" placeholder="选择Portal站点" @change="handlePortalChange" style="width: 200px;">
               <el-option v-for="site in portalSites" :key="site.id" :label="site.name" :value="site.id" />
             </el-select>
-            <el-select v-model="statusFilter" placeholder="状态筛选" clearable @change="fetchUsers" style="width: 120px; margin-left: 10px;">
+            <el-select v-model="statusFilter" placeholder="状态筛选" clearable @change="handleFilterChange" style="width: 120px;">
               <el-option label="全部" value="" />
               <el-option label="正常" value="active" />
               <el-option label="禁用" value="disabled" />
             </el-select>
           </div>
           <div class="right-actions">
+            <el-button type="success" :disabled="selectedRows.length === 0" @click="batchEnable">
+              批量启用 ({{ selectedRows.length }})
+            </el-button>
+            <el-button type="warning" :disabled="selectedRows.length === 0" @click="batchDisable">
+              批量禁用 ({{ selectedRows.length }})
+            </el-button>
             <el-button type="primary" @click="showCreateDialog" :disabled="!selectedPortalSite">
               <el-icon><Plus /></el-icon>
               创建用户
@@ -30,12 +36,18 @@
         </div>
       </template>
 
-      <el-table :data="users" v-loading="loading">
+      <el-table
+        :data="paginatedData"
+        v-loading="loading"
+        @selection-change="handleSelectionChange"
+        ref="tableRef"
+      >
+        <el-table-column type="selection" width="50" />
         <el-table-column prop="username" label="用户名" width="120" />
         <el-table-column label="密码" width="150">
           <template #default="{ row }">
             <div class="password-cell">
-              <span v-if="row._showPassword">{{ row.password }}</span>
+              <span v-if="row._showPassword">{{ row.password || '-' }}</span>
               <span v-else>******</span>
               <el-button size="small" text @click="togglePassword(row)">
                 {{ row._showPassword ? '隐藏' : '显示' }}
@@ -49,12 +61,9 @@
             {{ row.portal_site_name }}
           </template>
         </el-table-column>
-        <el-table-column label="Peer状态" width="180">
+        <el-table-column label="Peer状态" width="120">
           <template #default="{ row }">
-            <div v-if="row.peer">
-              <el-tag type="success" size="small">已配置</el-tag>
-              <span class="peer-node">{{ row.peer.node_name }}</span>
-            </div>
+            <el-tag v-if="row.peer" type="success" size="small">已配置</el-tag>
             <el-tag v-else type="info" size="small">未配置</el-tag>
           </template>
         </el-table-column>
@@ -70,7 +79,7 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250">
+        <el-table-column label="操作" width="200">
           <template #default="{ row }">
             <el-button size="small" @click="showPasswordDialog(row)">改密</el-button>
             <el-button
@@ -84,6 +93,18 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-container">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="users.length"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
     </el-card>
 
     <!-- 创建用户对话框 -->
@@ -184,6 +205,12 @@ const passwordDialogVisible = ref(false)
 const createFormRef = ref()
 const uploadRef = ref()
 const parsedUsers = ref([])
+const selectedRows = ref([])
+const tableRef = ref()
+
+// 分页
+const currentPage = ref(1)
+const pageSize = ref(10)
 
 const createForm = reactive({
   username: '',
@@ -207,9 +234,38 @@ const createRules = {
 
 const validUsers = computed(() => parsedUsers.value.filter(u => u.valid))
 
+const paginatedData = computed(() => {
+  const start = (currentPage.value - 1) * pageSize.value
+  const end = start + pageSize.value
+  return users.value.slice(start, end)
+})
+
 function formatDate(date) {
   if (!date) return ''
   return new Date(date).toLocaleString('zh-CN')
+}
+
+function handleSelectionChange(rows) {
+  selectedRows.value = rows
+}
+
+function handlePortalChange() {
+  currentPage.value = 1
+  selectedRows.value = []
+  fetchUsers()
+}
+
+function handleFilterChange() {
+  currentPage.value = 1
+  fetchUsers()
+}
+
+function handleSizeChange() {
+  currentPage.value = 1
+}
+
+function handleCurrentChange() {
+  // 页码改变时自动更新 paginatedData
 }
 
 async function fetchPortalSites() {
@@ -369,11 +425,10 @@ function exportUsers() {
     return
   }
 
-  // 生成 CSV 内容
   const headers = ['用户名', '密码', '邮箱', '状态', 'Portal站点', '注册时间']
   const rows = users.value.map(u => [
     u.username,
-    u.password,
+    u.password || '',
     u.email,
     u.status,
     u.portal_site_name,
@@ -381,8 +436,6 @@ function exportUsers() {
   ])
 
   const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n')
-
-  // 下载文件
   const blob = new Blob(['﻿' + csvContent], { type: 'text/csv;charset=utf-8' })
   const url = window.URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -408,6 +461,72 @@ async function toggleStatus(user) {
   } catch (error) {
     if (error !== 'cancel') {
       ElMessage.error(error.response?.data?.detail || '操作失败')
+    }
+  }
+}
+
+async function batchEnable() {
+  try {
+    await ElMessageBox.confirm(`确定要启用选中的 ${selectedRows.value.length} 个用户吗?`, '批量启用', { type: 'info' })
+
+    let success = 0
+    let failed = 0
+
+    for (const row of selectedRows.value) {
+      try {
+        await api.post(`/api/users/${row.portal_site_id}/${row.id}/enable`)
+        success++
+      } catch {
+        failed++
+      }
+    }
+
+    if (success > 0) {
+      ElMessage.success(`成功启用 ${success} 个用户${failed > 0 ? `，失败 ${failed} 个` : ''}`)
+    } else {
+      ElMessage.error('批量启用失败')
+    }
+
+    selectedRows.value = []
+    fetchUsers()
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error(error)
+    }
+  }
+}
+
+async function batchDisable() {
+  try {
+    await ElMessageBox.confirm(
+      `确定要禁用选中的 ${selectedRows.value.length} 个用户吗? 禁用后将清除所有Peer配置`,
+      '批量禁用',
+      { type: 'warning' }
+    )
+
+    let success = 0
+    let failed = 0
+
+    for (const row of selectedRows.value) {
+      try {
+        await api.post(`/api/users/${row.portal_site_id}/${row.id}/disable`)
+        success++
+      } catch {
+        failed++
+      }
+    }
+
+    if (success > 0) {
+      ElMessage.success(`成功禁用 ${success} 个用户${failed > 0 ? `，失败 ${failed} 个` : ''}`)
+    } else {
+      ElMessage.error('批量禁用失败')
+    }
+
+    selectedRows.value = []
+    fetchUsers()
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error(error)
     }
   }
 }
@@ -443,12 +562,6 @@ onMounted(() => {
   gap: 10px;
 }
 
-.peer-node {
-  margin-left: 8px;
-  color: #606266;
-  font-size: 12px;
-}
-
 .password-cell {
   display: flex;
   align-items: center;
@@ -476,5 +589,11 @@ onMounted(() => {
 
 .parsed-users {
   margin-top: 20px;
+}
+
+.pagination-container {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
 }
 </style>

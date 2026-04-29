@@ -83,7 +83,20 @@ async function handleRegister() {
     ElMessage.success('注册申请已提交，请等待管理员审批')
     router.push('/login')
   } catch (error) {
-    console.error(error)
+    if (error.response) {
+      const detail = error.response.data?.detail
+      if (detail) {
+        ElMessage.error(detail)
+      } else if (error.response.status === 500) {
+        ElMessage.error('服务器错误，请联系管理员')
+      } else {
+        ElMessage.error('注册失败，请稍后重试')
+      }
+    } else if (error.request) {
+      ElMessage.error('网络错误，请检查网络连接')
+    } else {
+      ElMessage.error('注册失败，请稍后重试')
+    }
   } finally {
     loading.value = false
   }

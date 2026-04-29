@@ -62,15 +62,29 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     """用户登录"""
     user = db.query(User).filter(User.username == form_data.username).first()
 
-    if not user or not verify_password(form_data.password, user.password_hash):
+    # 用户不存在，检查是否有待审核的注册申请
+    if not user:
+        pending_reg = db.query(Registration).filter(
+            Registration.username == form_data.username,
+            Registration.status == "pending"
+        ).first()
+        if pending_reg:
+            raise HTTPException(status_code=403, detail="该账户尚未通过审批，请联系管理员审批")
+        raise HTTPException(status_code=404, detail="该账户尚未注册，请先注册账户")
+
+    # 密码错误
+    if not verify_password(form_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="用户名或密码错误",
+            detail="密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if user.status != "active":
-        raise HTTPException(status_code=403, detail="账户未审核或已被禁用")
+    # 账户状态检查
+    if user.status == "pending":
+        raise HTTPException(status_code=403, detail="该账户尚未通过审批，请联系管理员审批")
+    if user.status == "disabled":
+        raise HTTPException(status_code=403, detail="该账户已被禁用，请联系管理员")
 
     access_token = create_access_token(
         data={"user_id": user.id, "is_admin": False},
