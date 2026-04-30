@@ -23,21 +23,21 @@ router = APIRouter(prefix="/api/portal", tags=["Portal API"])
 
 def verify_portal_site(
     api_key: Optional[str] = Header(None, alias="X-Admin-API-Key"),
+    key: Optional[str] = Header(None, alias="X-Key"),
     db: Session = Depends(get_db)
 ) -> PortalSite:
     """验证 Portal API 密钥并返回对应的 Portal 站点"""
-    if not api_key:
+    # 支持两种 header: X-Admin-API-Key 和 X-Key
+    provided_key = api_key or key
+    if not provided_key:
         raise HTTPException(status_code=401, detail="缺少 API 密钥")
 
     # 查找匹配的 Portal 站点
     sites = db.query(PortalSite).filter(PortalSite.status == "active").all()
     for site in sites:
-        try:
-            decrypted_key = encryption.decrypt(site.api_key)
-            if decrypted_key == api_key:
-                return site
-        except:
-            continue
+        # site.key 是明文存储的，直接比较
+        if site.key and site.key == provided_key:
+            return site
 
     raise HTTPException(status_code=403, detail="无效的 API 密钥")
 

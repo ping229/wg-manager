@@ -12,7 +12,7 @@ class AdminClient:
         self.timeout = 10.0
 
     def _get_headers(self) -> dict:
-        return {"X-Admin-API-Key": self.api_key} if self.api_key else {}
+        return {"X-Key": self.api_key} if self.api_key else {}
 
     async def _request(self, method: str, endpoint: str, data: dict = None) -> dict:
         """发送请求到 Admin API"""
@@ -69,21 +69,27 @@ class AdminClient:
     async def create_peer(self, user_id: int, username: str, node_id: int,
                           mtu: int = None, dns: str = None, keepalive: int = None) -> Dict:
         """创建 Peer 配置"""
-        data = {
-            "user_id": user_id,
-            "username": username,
-            "node_id": node_id,
-            "mtu": mtu,
-            "dns": dns,
-            "keepalive": keepalive
-        }
-        return await self._request("POST", "/api/portal/peer", data)
+        params = f"?user_id={user_id}&username={username}&node_id={node_id}"
+        if mtu:
+            params += f"&mtu={mtu}"
+        if dns:
+            params += f"&dns={dns}"
+        if keepalive:
+            params += f"&keepalive={keepalive}"
+        return await self._request("POST", f"/api/portal/peer{params}")
 
     async def update_peer_settings(self, user_id: int, mtu: int = None,
                                    dns: str = None, keepalive: int = None) -> Dict:
         """更新 Peer 设置"""
-        data = {"mtu": mtu, "dns": dns, "keepalive": keepalive}
-        return await self._request("PUT", f"/api/portal/peer/{user_id}/settings", data)
+        params = []
+        if mtu:
+            params.append(f"mtu={mtu}")
+        if dns:
+            params.append(f"dns={dns}")
+        if keepalive:
+            params.append(f"keepalive={keepalive}")
+        query = "?" + "&".join(params) if params else ""
+        return await self._request("PUT", f"/api/portal/peer/{user_id}/settings{query}")
 
     async def delete_peer(self, user_id: int) -> Dict:
         """删除 Peer 配置"""
@@ -109,8 +115,8 @@ def get_admin_client(db: Session) -> Optional[AdminClient]:
     from backend.portal.models import AdminConnection
     from backend.portal.config import settings
 
-    # 检查配置文件
-    if not settings.ADMIN_URL or not settings.ADMIN_API_KEY:
+    # 检查配置文件 - 使用统一的 KEY
+    if not settings.ADMIN_URL or not settings.KEY:
         return None
 
     # 检查数据库中的连接状态
@@ -120,6 +126,6 @@ def get_admin_client(db: Session) -> Optional[AdminClient]:
 
     # 如果已批准或未申请过，返回客户端
     if not connection or connection.status == "approved":
-        return AdminClient(url=settings.ADMIN_URL, api_key=settings.ADMIN_API_KEY)
+        return AdminClient(url=settings.ADMIN_URL, api_key=settings.KEY)
 
     return None  # pending 状态也不可用
