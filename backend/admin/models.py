@@ -79,7 +79,8 @@ class Node(Base):
     default_download_limit = Column(Integer, default=0)
     status = Column(String(20), default="active")
     api_url = Column(String(255), nullable=False)
-    api_key = Column(String(100), nullable=False)
+    api_key = Column(String(100), nullable=False)  # 加密存储（向后兼容）
+    key = Column(String(100), nullable=True)  # Agent 的 KEY（明文存储，与 PortalSite 一致）
     blocked_patterns = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

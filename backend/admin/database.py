@@ -47,6 +47,12 @@ def migrate_db():
     else:
         peers_columns = []
 
+    # 获取 nodes 表的列名
+    if inspector.has_table('nodes'):
+        nodes_columns = [col['name'] for col in inspector.get_columns('nodes')]
+    else:
+        nodes_columns = []
+
     with engine.connect() as conn:
         # portal_sites 表迁移: api_key -> key
         if portal_sites_columns:
@@ -93,6 +99,14 @@ def migrate_db():
                 conn.execute(text('ALTER TABLE peers ADD COLUMN portal_user_id INTEGER'))
                 conn.commit()
                 print("Column portal_user_id added successfully")
+
+        # nodes 表迁移
+        if nodes_columns:
+            if 'key' not in nodes_columns:
+                print("Adding key column to nodes table...")
+                conn.execute(text('ALTER TABLE nodes ADD COLUMN key VARCHAR(100)'))
+                conn.commit()
+                print("Column key added successfully")
 
 
 def init_db():

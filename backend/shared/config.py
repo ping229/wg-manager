@@ -4,55 +4,26 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    """共享配置 - 用于向后兼容和 Agent 服务"""
+    """共享配置 - 用于 Agent 服务"""
     # 基础配置
     BASE_DIR: Path = Path("/opt/wg-manager")
     DATA_DIR: Path = Path("/opt/wg-manager/data")
     LOG_DIR: Path = Path("/opt/wg-manager/data/logs")
     CONFIG_DIR: Path = Path("/opt/wg-manager/data/configs")
 
-    # 数据库 (默认值，各服务可覆盖)
-    DATABASE_URL: str = "sqlite:////opt/wg-manager/data/wg.db"
-
-    # JWT配置
-    SECRET_KEY: str = os.getenv("SECRET_KEY", "change-this-secret-key-in-production")
-    ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24小时
-
-    # 加密密钥(用于加密私钥等敏感数据)
-    ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "change-this-encryption-key-32bytes!!")
-
-    # Portal服务配置
-    PORTAL_HOST: str = os.getenv("PORTAL_HOST", "0.0.0.0")
-    PORTAL_PORT: int = int(os.getenv("PORTAL_PORT", "8080"))
-
-    # Admin服务配置
-    ADMIN_HOST: str = os.getenv("ADMIN_HOST", "127.0.0.1")
-    ADMIN_PORT: int = int(os.getenv("ADMIN_PORT", "8081"))
-    ADMIN_URL: str = os.getenv("ADMIN_URL", "http://127.0.0.1:8081")
-
     # Agent服务配置
-    AGENT_HOST: str = os.getenv("AGENT_HOST", "127.0.0.1")
+    AGENT_HOST: str = os.getenv("AGENT_HOST", "0.0.0.0")
     AGENT_PORT: int = int(os.getenv("AGENT_PORT", "8082"))
-    DEFAULT_AGENT_URL: str = os.getenv("DEFAULT_AGENT_URL", "http://127.0.0.1:8082")
+
+    # 统一 KEY - 用于 Admin 与 Agent 之间的认证
+    KEY: str = os.getenv("KEY", "")
+
+    # 向后兼容
     AGENT_API_KEY: str = os.getenv("AGENT_API_KEY", "")
-
-    # Portal/Admin API 密钥
-    PORTAL_API_KEY: str = os.getenv("PORTAL_API_KEY", "")
-    ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "")
-
-    # WireGuard配置
-    WG_DEFAULT_PORT: int = 51820
-    WG_DEFAULT_INTERFACE: str = "wg0"
-    WG_DEFAULT_DNS: str = "8.8.8.8"
-    WG_DEFAULT_MTU: int = 1420
-    WG_DEFAULT_KEEPALIVE: int = 25
-
-    # 超级管理员初始密码
-    SUPER_ADMIN_PASSWORD: str = os.getenv("SUPER_ADMIN_PASSWORD", "admin123")
+    ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", "")
 
     class Config:
-        env_file = ".env"
+        env_file = "/opt/wg-manager/.env"
         extra = "ignore"
 
 

@@ -188,7 +188,16 @@ generate_config() {
             all)
                 expected_db="wg.db"
                 ;;
+            agent)
+                expected_db=""  # Agent 不需要数据库
+                ;;
         esac
+
+        # Agent 模式不需要检查数据库
+        if [[ $DEPLOY_MODE == "agent" ]]; then
+            log_warn ".env 文件已存在，跳过生成"
+            return
+        fi
 
         if [[ -n "$db_url" ]] && [[ "$db_url" == *"$expected_db"* ]]; then
             log_warn ".env 文件已存在且配置正确，跳过生成"
@@ -263,6 +272,20 @@ DATABASE_URL=sqlite:///${INSTALL_DIR}/data/admin.db
 # 注意：Admin 端不配置 KEY，而是在"Portal 站点管理"中为每个 Portal 配置 KEY
 # 每个 Portal 的 KEY 必须与对应 Portal 端的 KEY 相同
 EOF
+    elif [[ $DEPLOY_MODE == "agent" ]]; then
+        cat > "$env_file" << EOF
+# WireGuard Agent 配置文件
+# 生成时间: $(date)
+
+# Agent 服务配置
+AGENT_HOST=0.0.0.0
+AGENT_PORT=8082
+
+# ============ KEY (必填) ============
+# KEY 用于 Agent 与 Admin 之间的双向认证
+# 必须与 Admin 端配置的节点 KEY 相同
+KEY=${key}
+EOF
     else
         # all 模式
         cat > "$env_file" << EOF
@@ -296,8 +319,6 @@ ADMIN_PORT=8081
 # Agent 服务配置
 AGENT_HOST=0.0.0.0
 AGENT_PORT=8082
-DEFAULT_AGENT_URL=http://127.0.0.1:8082
-AGENT_API_KEY=
 
 # 数据库
 DATABASE_URL=sqlite:///${INSTALL_DIR}/data/wg.db
@@ -326,7 +347,19 @@ EOF
         log_info "  2. 访问后台: http://HOST:8081"
         log_info "  3. 默认账号: admin / admin123"
         log_info "  4. 在'Portal 站点管理'中添加 Portal（KEY 需与 Portal 端相同）"
+        log_info "  5. 在'节点管理'中添加 Agent 节点（KEY 需与 Agent 端相同）"
         log_info ""
+    elif [[ $DEPLOY_MODE == "agent" ]]; then
+        log_info ""
+        log_warn "============================================"
+        log_warn "  Agent 接入配置 (重要)"
+        log_warn "============================================"
+        log_warn ""
+        log_warn "请编辑 .env 文件，修改以下配置："
+        log_warn "  KEY - 与 Admin 端配置的节点 KEY 相同"
+        log_warn ""
+        log_warn "然后在 Admin 的'节点管理'中添加此 Agent 节点"
+        log_warn ""
     fi
 }
 

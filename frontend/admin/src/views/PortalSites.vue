@@ -15,6 +15,15 @@
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="url" label="地址" />
+        <el-table-column label="KEY" width="150">
+          <template #default="{ row }">
+            <div class="key-cell" v-if="row.key">
+              <span class="key-text">{{ maskKey(row.key) }}</span>
+              <el-button size="small" text @click="copyKey(row.key)">复制</el-button>
+            </div>
+            <span v-else class="text-muted">未设置</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="description" label="描述" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
@@ -88,6 +97,19 @@ const form = ref({
   description: '',
   status: 'active'
 })
+
+function maskKey(key) {
+  if (!key || key.length < 8) return key || ''
+  return key.substring(0, 4) + '****' + key.substring(key.length - 4)
+}
+
+function copyKey(key) {
+  navigator.clipboard.writeText(key).then(() => {
+    ElMessage.success('已复制到剪贴板')
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
+}
 
 const loadSites = async () => {
   loading.value = true
@@ -176,3 +198,21 @@ onMounted(() => {
   loadSites()
 })
 </script>
+
+<style scoped>
+.key-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-text {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.text-muted {
+  color: #909399;
+  font-size: 12px;
+}
+</style>

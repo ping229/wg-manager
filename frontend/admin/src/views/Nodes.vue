@@ -4,38 +4,53 @@
       <template #header>
         <div class="card-header">
           <span>节点管理</span>
-          <el-button type="primary" @click="showDialog()">
-            <el-icon><Plus /></el-icon>
-            添加节点
-          </el-button>
+          <div class="header-actions">
+            <el-button type="success" :disabled="selectedRows.length === 0" @click="batchEnable">
+              批量启用 ({{ selectedRows.length }})
+            </el-button>
+            <el-button type="warning" :disabled="selectedRows.length === 0" @click="batchDisable">
+              批量禁用 ({{ selectedRows.length }})
+            </el-button>
+            <el-button @click="exportNodes">
+              <el-icon><Download /></el-icon>
+              导出
+            </el-button>
+            <el-button @click="importDialogVisible = true">
+              <el-icon><Upload /></el-icon>
+              导入
+            </el-button>
+            <el-button type="primary" @click="showDialog()">
+              <el-icon><Plus /></el-icon>
+              添加节点
+            </el-button>
+          </div>
         </div>
       </template>
 
-      <el-table :data="nodes" v-loading="loading">
+      <el-table
+        :data="nodes"
+        v-loading="loading"
+        @selection-change="handleSelectionChange"
+        ref="tableRef"
+      >
+        <el-table-column type="selection" width="50" />
         <el-table-column prop="name" label="名称" width="120" />
         <el-table-column prop="endpoint" label="地址" />
         <el-table-column prop="wg_port" label="端口" width="80" />
         <el-table-column prop="address_pool" label="地址池" />
+        <el-table-column label="KEY" width="150">
+          <template #default="{ row }">
+            <div class="key-cell" v-if="row.key">
+              <span class="key-text">{{ maskKey(row.key) }}</span>
+              <el-button size="small" text @click="copyToClipboard(row.key)">复制</el-button>
+            </div>
+            <span v-else class="text-muted">未设置</span>
+          </template>
+        </el-table-column>
         <el-table-column label="客户端" width="80" align="center">
           <template #default="{ row }">
             <span v-if="row.online">{{ row.peer_count }}</span>
             <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="访问限制" width="90" align="center">
-          <template #default="{ row }">
-            <el-tag v-if="getBlockedCount(row) > 0" type="warning" size="small">
-              {{ getBlockedCount(row) }}条
-            </el-tag>
-            <span v-else class="text-muted">无</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="限速" width="120">
-          <template #default="{ row }">
-            <span v-if="row.default_upload_limit > 0 || row.default_download_limit > 0">
-              ↑{{ row.default_upload_limit || 0 }} / ↓{{ row.default_download_limit || 0 }} Mbps
-            </span>
-            <span v-else class="text-muted">不限速</span>
           </template>
         </el-table-column>
         <el-table-column label="在线状态" width="90">
@@ -52,7 +67,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="350">
+        <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button size="small" @click="showDetail(row)">查看</el-button>
             <el-button size="small" @click="showAccessControl(row)">访问控制</el-button>
@@ -102,10 +117,10 @@
             <el-button size="small" text @click="copyToClipboard(detailData.api_url)">复制</el-button>
           </div>
         </el-descriptions-item>
-        <el-descriptions-item label="API密钥">
+        <el-descriptions-item label="KEY">
           <div class="copy-field">
-            <span class="api-key">{{ detailData.api_key }}</span>
-            <el-button size="small" text @click="copyToClipboard(detailData.api_key)">复制</el-button>
+            <span class="key-text">{{ detailData.key || '未设置' }}</span>
+            <el-button v-if="detailData.key" size="small" text @click="copyToClipboard(detailData.key)">复制</el-button>
           </div>
         </el-descriptions-item>
         <el-descriptions-item label="公钥">
@@ -155,6 +170,7 @@
       </template>
     </el-dialog>
 
+    <!-- 添加/编辑对话框 -->
     <el-dialog v-model="dialogVisible" :title="editId ? '编辑节点' : '添加节点'" width="550px">
       <el-form :model="form" :rules="rules" ref="formRef" label-width="110px">
         <el-form-item label="名称" prop="name">
@@ -192,14 +208,46 @@
         <el-form-item label="Agent URL" prop="api_url">
           <el-input v-model="form.api_url" placeholder="如: http://192.168.1.100:8082" />
         </el-form-item>
-        <el-form-item label="API密钥" prop="api_key">
-          <el-input v-model="form.api_key" :placeholder="editId ? '留空保持不变' : 'Agent API密钥'" />
-          <span v-if="editId" class="form-tip">留空则保持原有密钥不变</span>
+        <el-form-item label="KEY" prop="key">
+          <el-input v-model="form.key" placeholder="与 Agent 端配置的 KEY 相同" />
+          <span class="form-tip">用于 Admin 与 Agent 之间的认证</span>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="submitForm" :loading="submitting">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 导入对话框 -->
+    <el-dialog v-model="importDialogVisible" title="导入节点" width="600px">
+      <div class="import-tips">
+        <p>请上传 JSON 格式的节点配置文件，或直接粘贴 JSON 内容</p>
+        <el-input
+          v-model="importJson"
+          type="textarea"
+          :rows="10"
+          placeholder='粘贴 JSON 内容，格式如：
+{
+  "nodes": [
+    {
+      "name": "节点名称",
+      "endpoint": "vpn.example.com",
+      "wg_port": 51820,
+      "address_pool": "10.100.0.0/24",
+      "api_url": "http://192.168.1.100:8082",
+      "key": "your-key-here",
+      ...
+    }
+  ]
+}'
+        />
+      </div>
+      <template #footer>
+        <el-button @click="importDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="importNodes" :loading="importing" :disabled="!importJson">
+          导入
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -208,16 +256,24 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Download, Upload } from '@element-plus/icons-vue'
 import { api } from '../api'
 
 const loading = ref(false)
 const submitting = ref(false)
+const importing = ref(false)
 const nodes = ref([])
+const selectedRows = ref([])
+const tableRef = ref()
 const dialogVisible = ref(false)
 const detailVisible = ref(false)
 const editId = ref(null)
 const formRef = ref()
 const detailData = ref({})
+
+// 导入相关
+const importDialogVisible = ref(false)
+const importJson = ref('')
 
 // 访问控制相关
 const accessControlVisible = ref(false)
@@ -238,14 +294,24 @@ const form = reactive({
   default_upload_limit: 0,
   default_download_limit: 0,
   api_url: '',
-  api_key: ''
+  key: ''
 })
 
 const rules = {
   name: [{ required: true, message: '请输入名称', trigger: 'blur' }],
   endpoint: [{ required: true, message: '请输入地址', trigger: 'blur' }],
   address_pool: [{ required: true, message: '请输入地址池', trigger: 'blur' }],
-  api_url: [{ required: true, message: '请输入Agent URL', trigger: 'blur' }]
+  api_url: [{ required: true, message: '请输入Agent URL', trigger: 'blur' }],
+  key: [{ required: true, message: '请输入 KEY', trigger: 'blur' }]
+}
+
+function handleSelectionChange(rows) {
+  selectedRows.value = rows
+}
+
+function maskKey(key) {
+  if (!key || key.length < 8) return key || ''
+  return key.substring(0, 4) + '****' + key.substring(key.length - 4)
 }
 
 function getBlockedCount(node) {
@@ -332,7 +398,7 @@ function showDialog(node = null) {
       default_upload_limit: node.default_upload_limit || 0,
       default_download_limit: node.default_download_limit || 0,
       api_url: node.api_url,
-      api_key: ''  // 显示已有密钥，留空则保持不变
+      key: node.key || ''
     })
   } else {
     Object.assign(form, {
@@ -347,7 +413,7 @@ function showDialog(node = null) {
       default_upload_limit: 0,
       default_download_limit: 0,
       api_url: '',
-      api_key: ''
+      key: ''
     })
   }
   dialogVisible.value = true
@@ -358,17 +424,11 @@ async function submitForm() {
     await formRef.value.validate()
     submitting.value = true
 
-    // 如果编辑时API密钥为空，不传递该字段
-    const submitData = { ...form }
-    if (editId.value && !submitData.api_key) {
-      delete submitData.api_key
-    }
-
     if (editId.value) {
-      await api.put(`/api/nodes/${editId.value}`, submitData)
+      await api.put(`/api/nodes/${editId.value}`, form)
       ElMessage.success('更新成功')
     } else {
-      await api.post('/api/nodes', submitData)
+      await api.post('/api/nodes', form)
       ElMessage.success('添加成功')
     }
 
@@ -401,7 +461,6 @@ async function deleteNode(node) {
       ElMessage.success('删除成功')
       fetchNodes()
     } catch (error) {
-      // 如果有Peer存在，提示是否强制删除
       if (error.response?.status === 400) {
         const detail = error.response.data.detail
         if (detail.includes('Peer')) {
@@ -427,6 +486,85 @@ async function deleteNode(node) {
   }
 }
 
+// 批量操作
+async function batchEnable() {
+  try {
+    await ElMessageBox.confirm(`确定要启用选中的 ${selectedRows.value.length} 个节点吗?`, '批量启用', { type: 'info' })
+    const nodeIds = selectedRows.value.map(n => n.id)
+    const { data } = await api.post('/api/nodes/batch-enable', { node_ids: nodeIds })
+    ElMessage.success(data.message)
+    selectedRows.value = []
+    fetchNodes()
+  } catch (error) {
+    if (error !== 'cancel') console.error(error)
+  }
+}
+
+async function batchDisable() {
+  try {
+    await ElMessageBox.confirm(
+      `确定要禁用选中的 ${selectedRows.value.length} 个节点吗? 禁用后将清空该节点下的所有Peer。`,
+      '批量禁用',
+      { type: 'warning' }
+    )
+    const nodeIds = selectedRows.value.map(n => n.id)
+    const { data } = await api.post('/api/nodes/batch-disable', { node_ids: nodeIds })
+    ElMessage.success(data.message)
+    selectedRows.value = []
+    fetchNodes()
+  } catch (error) {
+    if (error !== 'cancel') console.error(error)
+  }
+}
+
+// 导出
+async function exportNodes() {
+  try {
+    const { data } = await api.get('/api/nodes/export')
+    const jsonStr = JSON.stringify(data, null, 2)
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nodes_${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    window.URL.revokeObjectURL(url)
+    ElMessage.success(`已导出 ${data.count} 个节点`)
+  } catch (error) {
+    ElMessage.error('导出失败')
+  }
+}
+
+// 导入
+async function importNodes() {
+  if (!importJson.value.trim()) {
+    ElMessage.warning('请输入 JSON 内容')
+    return
+  }
+
+  importing.value = true
+  try {
+    const jsonData = JSON.parse(importJson.value)
+    const nodesData = jsonData.nodes || [jsonData]
+    const { data } = await api.post('/api/nodes/import', { nodes: nodesData })
+    ElMessage.success(data.message)
+    if (data.errors && data.errors.length > 0) {
+      console.warn('导入错误:', data.errors)
+    }
+    importDialogVisible.value = false
+    importJson.value = ''
+    fetchNodes()
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      ElMessage.error('JSON 格式错误')
+    } else {
+      ElMessage.error(error.response?.data?.detail || '导入失败')
+    }
+  } finally {
+    importing.value = false
+  }
+}
+
 onMounted(fetchNodes)
 </script>
 
@@ -435,6 +573,11 @@ onMounted(fetchNodes)
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
 }
 
 .text-muted {
@@ -454,7 +597,18 @@ onMounted(fetchNodes)
   gap: 8px;
 }
 
-.api-key, .public-key {
+.key-cell {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.key-text {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.public-key {
   font-family: monospace;
   font-size: 12px;
   word-break: break-all;
@@ -478,5 +632,14 @@ onMounted(fetchNodes)
 
 .pattern-tag {
   font-family: monospace;
+}
+
+.import-tips {
+  margin-bottom: 16px;
+}
+
+.import-tips p {
+  margin-bottom: 10px;
+  color: #606266;
 }
 </style>

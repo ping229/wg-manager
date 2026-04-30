@@ -70,13 +70,14 @@ def allocate_ip(db: Session, node: Node) -> str:
 
 async def call_agent(node: Node, endpoint: str, data: dict) -> dict:
     """调用Agent API"""
-    api_key = encryption.decrypt(node.api_key)
+    # 优先使用 key，否则使用解密的 api_key（向后兼容）
+    auth_key = node.key or encryption.decrypt(node.api_key)
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(
                 f"{node.api_url.rstrip('/')}{endpoint}",
                 json=data,
-                headers={"X-API-Key": api_key},
+                headers={"X-Key": auth_key},
                 timeout=10.0
             )
             if response.status_code != 200:
@@ -88,13 +89,13 @@ async def call_agent(node: Node, endpoint: str, data: dict) -> dict:
 
 async def remove_peer_from_agent(node: Node, public_key: str):
     """从Agent删除Peer"""
-    api_key = encryption.decrypt(node.api_key)
+    auth_key = node.key or encryption.decrypt(node.api_key)
     async with httpx.AsyncClient() as client:
         try:
             await client.post(
                 f"{node.api_url.rstrip('/')}/api/peer/remove",
                 json={"public_key": public_key},
-                headers={"X-API-Key": api_key},
+                headers={"X-Key": auth_key},
                 timeout=10.0
             )
         except Exception:
@@ -104,11 +105,9 @@ async def remove_peer_from_agent(node: Node, public_key: str):
 async def check_node_online(node: Node) -> bool:
     """检查节点是否在线"""
     try:
-        api_key = encryption.decrypt(node.api_key)
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{node.api_url.rstrip('/')}/health",
-                headers={"X-API-Key": api_key},
                 timeout=3.0
             )
             return response.status_code == 200
@@ -118,12 +117,12 @@ async def check_node_online(node: Node) -> bool:
 
 async def sync_node_public_key(node: Node, db: Session) -> str:
     """从 Agent 同步节点公钥"""
-    api_key = encryption.decrypt(node.api_key)
+    auth_key = node.key or encryption.decrypt(node.api_key)
     try:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"{node.api_url.rstrip('/')}/api/status",
-                headers={"X-API-Key": api_key},
+                headers={"X-Key": auth_key},
                 timeout=5.0
             )
             if response.status_code == 200:

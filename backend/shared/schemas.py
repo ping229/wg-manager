@@ -94,7 +94,8 @@ class NodeCreate(BaseModel):
     default_upload_limit: int = 0  # 默认上传限速 Mbps
     default_download_limit: int = 0  # 默认下载限速 Mbps
     api_url: str
-    api_key: str
+    key: str  # Agent 的 KEY（明文存储，与 PortalSite 一致）
+    api_key: Optional[str] = None  # 向后兼容，可选
 
 
 class NodeUpdate(BaseModel):
@@ -109,6 +110,7 @@ class NodeUpdate(BaseModel):
     default_upload_limit: Optional[int] = None
     default_download_limit: Optional[int] = None
     api_url: Optional[str] = None
+    key: Optional[str] = None
     api_key: Optional[str] = None
     blocked_patterns: Optional[str] = None  # JSON数组格式的正则列表
 

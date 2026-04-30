@@ -21,11 +21,19 @@ wg_service = WireGuardService()
 traffic_service = TrafficControlService()
 
 
-def verify_api_key(x_api_key: str = Header(None)):
+def verify_api_key(
+    x_api_key: str = Header(None),
+    x_key: str = Header(None)
+):
     """验证API密钥"""
-    # 优先使用 AGENT_API_KEY，为空时使用 ENCRYPTION_KEY
-    valid_key = settings.AGENT_API_KEY or settings.ENCRYPTION_KEY
-    if not x_api_key or x_api_key != valid_key:
+    # 支持两种 header: X-API-Key 和 X-Key
+    provided_key = x_api_key or x_key
+    if not provided_key:
+        raise HTTPException(status_code=401, detail="缺少 API 密钥")
+
+    # 优先使用 KEY，否则使用 AGENT_API_KEY 或 ENCRYPTION_KEY（向后兼容）
+    valid_key = settings.KEY or settings.AGENT_API_KEY or settings.ENCRYPTION_KEY
+    if not valid_key or provided_key != valid_key:
         raise HTTPException(status_code=401, detail="无效的API密钥")
     return True
 
