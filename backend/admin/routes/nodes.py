@@ -1,5 +1,8 @@
 import subprocess
 import httpx
+import json
+from typing import List, Optional
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -27,7 +30,6 @@ def generate_keypair() -> tuple[str, str]:
 
 async def call_agent(node: Node, endpoint: str, data: dict = None) -> dict:
     """调用Agent API"""
-    # 优先使用 key，否则使用解密的 api_key（向后兼容）
     auth_key = node.key or encryption.decrypt(node.api_key)
     async with httpx.AsyncClient() as client:
         try:
@@ -62,6 +64,39 @@ def get_node_auth_key(node: Node) -> str:
     return node.key or encryption.decrypt(node.api_key)
 
 
+# ============ Pydantic Models ============
+
+class BatchNodeIds(BaseModel):
+    """批量节点 ID 列表"""
+    node_ids: List[int]
+
+
+class NodeImport(BaseModel):
+    """节点导入数据"""
+    name: str
+    endpoint: str
+    wg_port: int = 51820
+    wg_interface: str = "wg0"
+    public_key: str
+    private_key: str
+    address_pool: str
+    dns: str = "8.8.8.8"
+    mtu: int = 1420
+    keepalive: int = 25
+    default_upload_limit: int = 0
+    default_download_limit: int = 0
+    api_url: str
+    key: str
+    blocked_patterns: Optional[str] = None
+
+
+class NodesImport(BaseModel):
+    """批量导入节点"""
+    nodes: List[NodeImport]
+
+
+# ============ 列表和基础操作 ============
+
 @router.get("")
 async def list_nodes(
     db: Session = Depends(get_db),
@@ -74,7 +109,6 @@ async def list_nodes(
     for node in nodes:
         is_online = await check_node_online(node)
 
-        # 从Agent获取实际peer数量
         peer_count = 0
         if is_online:
             try:
@@ -116,39 +150,181 @@ async def list_nodes(
     return result
 
 
-@router.get("/{node_id}")
-async def get_node(
-    node_id: int,
+# ============ 批量操作（必须在 /{node_id} 之前定义） ============
+
+@router.post("/batch-enable")
+async def batch_enable_nodes(
+    data: BatchNodeIds,
     db: Session = Depends(get_db),
     current_admin: AdminUser = Depends(get_current_admin)
 ):
-    """获取单个节点详情"""
-    node = db.query(Node).filter(Node.id == node_id).first()
-    if not node:
-        raise HTTPException(status_code=404, detail="节点不存在")
+    """批量启用节点"""
+    success = 0
+    failed = 0
 
-    is_online = await check_node_online(node)
+    for node_id in data.node_ids:
+        node = db.query(Node).filter(Node.id == node_id).first()
+        if node and node.status != "active":
+            node.status = "active"
+            success += 1
+        else:
+            failed += 1
+
+    db.commit()
+    return {"message": f"成功启用 {success} 个节点", "success": success, "failed": failed}
+
+
+@router.post("/batch-disable")
+async def batch_disable_nodes(
+    data: BatchNodeIds,
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """批量禁用节点"""
+    success = 0
+    failed = 0
+
+    for node_id in data.node_ids:
+        node = db.query(Node).filter(Node.id == node_id).first()
+        if node and node.status != "disabled":
+            peers = db.query(Peer).filter(Peer.node_id == node_id).all()
+            try:
+                await call_agent(node, "/api/peer/clear")
+            except:
+                pass
+            for peer in peers:
+                db.delete(peer)
+            node.status = "disabled"
+            success += 1
+        else:
+            failed += 1
+
+    db.commit()
+    return {"message": f"成功禁用 {success} 个节点", "success": success, "failed": failed}
+
+
+@router.post("/batch-delete")
+async def batch_delete_nodes(
+    data: BatchNodeIds,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """批量删除节点"""
+    success = 0
+    failed = 0
+
+    for node_id in data.node_ids:
+        node = db.query(Node).filter(Node.id == node_id).first()
+        if not node:
+            failed += 1
+            continue
+
+        peers = db.query(Peer).filter(Peer.node_id == node_id).all()
+        if peers and not force:
+            failed += 1
+            continue
+
+        try:
+            await call_agent(node, "/api/peer/clear")
+        except:
+            pass
+
+        for peer in peers:
+            db.delete(peer)
+        db.delete(node)
+        success += 1
+
+    db.commit()
+    return {"message": f"成功删除 {success} 个节点", "success": success, "failed": failed}
+
+
+# ============ 导入导出（必须在 /{node_id} 之前定义） ============
+
+@router.get("/export")
+def export_nodes(
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """导出节点配置"""
+    nodes = db.query(Node).all()
+
+    export_data = []
+    for node in nodes:
+        export_data.append({
+            "name": node.name,
+            "endpoint": node.endpoint,
+            "wg_port": node.wg_port,
+            "wg_interface": node.wg_interface,
+            "public_key": node.public_key,
+            "private_key": encryption.decrypt(node.private_key),
+            "address_pool": node.address_pool,
+            "dns": node.dns,
+            "mtu": node.mtu,
+            "keepalive": node.keepalive,
+            "default_upload_limit": node.default_upload_limit or 0,
+            "default_download_limit": node.default_download_limit or 0,
+            "api_url": node.api_url,
+            "key": node.key,
+            "blocked_patterns": node.blocked_patterns
+        })
+
+    return {"nodes": export_data, "count": len(export_data)}
+
+
+@router.post("/import")
+def import_nodes(
+    data: NodesImport,
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """导入节点配置"""
+    success = 0
+    failed = 0
+    errors = []
+
+    for node_data in data.nodes:
+        try:
+            if db.query(Node).filter(Node.name == node_data.name).first():
+                errors.append(f"节点 {node_data.name}: 名称已存在")
+                failed += 1
+                continue
+
+            node = Node(
+                name=node_data.name,
+                endpoint=node_data.endpoint,
+                wg_port=node_data.wg_port,
+                wg_interface=node_data.wg_interface,
+                public_key=node_data.public_key,
+                private_key=encryption.encrypt(node_data.private_key),
+                address_pool=node_data.address_pool,
+                dns=node_data.dns,
+                mtu=node_data.mtu,
+                keepalive=node_data.keepalive,
+                default_upload_limit=node_data.default_upload_limit,
+                default_download_limit=node_data.default_download_limit,
+                api_url=node_data.api_url,
+                key=node_data.key,
+                api_key="",
+                blocked_patterns=node_data.blocked_patterns,
+                status="active"
+            )
+            db.add(node)
+            success += 1
+        except Exception as e:
+            errors.append(f"节点 {node_data.name}: {str(e)}")
+            failed += 1
+
+    db.commit()
     return {
-        "id": node.id,
-        "name": node.name,
-        "endpoint": node.endpoint,
-        "wg_port": node.wg_port,
-        "wg_interface": node.wg_interface,
-        "public_key": node.public_key,
-        "address_pool": node.address_pool,
-        "dns": node.dns,
-        "mtu": node.mtu,
-        "keepalive": node.keepalive,
-        "default_upload_limit": node.default_upload_limit or 0,
-        "default_download_limit": node.default_download_limit or 0,
-        "status": node.status,
-        "online": is_online,
-        "api_url": node.api_url,
-        "key": node.key,
-        "blocked_patterns": node.blocked_patterns,
-        "created_at": node.created_at
+        "message": f"成功导入 {success} 个节点，失败 {failed} 个",
+        "success": success,
+        "failed": failed,
+        "errors": errors
     }
 
+
+# ============ 单个节点操作 ============
 
 @router.post("", response_model=NodeResponse)
 def create_node(
@@ -185,6 +361,40 @@ def create_node(
     db.refresh(node)
 
     return node
+
+
+@router.get("/{node_id}")
+async def get_node(
+    node_id: int,
+    db: Session = Depends(get_db),
+    current_admin: AdminUser = Depends(get_current_admin)
+):
+    """获取单个节点详情"""
+    node = db.query(Node).filter(Node.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    is_online = await check_node_online(node)
+    return {
+        "id": node.id,
+        "name": node.name,
+        "endpoint": node.endpoint,
+        "wg_port": node.wg_port,
+        "wg_interface": node.wg_interface,
+        "public_key": node.public_key,
+        "address_pool": node.address_pool,
+        "dns": node.dns,
+        "mtu": node.mtu,
+        "keepalive": node.keepalive,
+        "default_upload_limit": node.default_upload_limit or 0,
+        "default_download_limit": node.default_download_limit or 0,
+        "status": node.status,
+        "online": is_online,
+        "api_url": node.api_url,
+        "key": node.key,
+        "blocked_patterns": node.blocked_patterns,
+        "created_at": node.created_at
+    }
 
 
 @router.put("/{node_id}", response_model=NodeResponse)
@@ -328,215 +538,3 @@ async def sync_node(
             "synced": False,
             "error": str(e.detail)
         }
-
-
-# ============ 批量操作 ============
-
-from typing import List
-from pydantic import BaseModel
-
-
-class BatchNodeIds(BaseModel):
-    """批量节点 ID 列表"""
-    node_ids: List[int]
-
-
-@router.post("/batch-enable")
-async def batch_enable_nodes(
-    data: BatchNodeIds,
-    db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin)
-):
-    """批量启用节点"""
-    success = 0
-    failed = 0
-
-    for node_id in data.node_ids:
-        node = db.query(Node).filter(Node.id == node_id).first()
-        if node and node.status != "active":
-            node.status = "active"
-            success += 1
-        else:
-            failed += 1
-
-    db.commit()
-    return {"message": f"成功启用 {success} 个节点", "success": success, "failed": failed}
-
-
-@router.post("/batch-disable")
-async def batch_disable_nodes(
-    data: BatchNodeIds,
-    db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin)
-):
-    """批量禁用节点"""
-    success = 0
-    failed = 0
-
-    for node_id in data.node_ids:
-        node = db.query(Node).filter(Node.id == node_id).first()
-        if node and node.status != "disabled":
-            # 清空该节点的所有 Peer
-            peers = db.query(Peer).filter(Peer.node_id == node_id).all()
-            try:
-                await call_agent(node, "/api/peer/clear")
-            except:
-                pass
-            for peer in peers:
-                db.delete(peer)
-            node.status = "disabled"
-            success += 1
-        else:
-            failed += 1
-
-    db.commit()
-    return {"message": f"成功禁用 {success} 个节点", "success": success, "failed": failed}
-
-
-@router.post("/batch-delete")
-async def batch_delete_nodes(
-    data: BatchNodeIds,
-    force: bool = False,
-    db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin)
-):
-    """批量删除节点"""
-    success = 0
-    failed = 0
-
-    for node_id in data.node_ids:
-        node = db.query(Node).filter(Node.id == node_id).first()
-        if not node:
-            failed += 1
-            continue
-
-        peers = db.query(Peer).filter(Peer.node_id == node_id).all()
-        if peers and not force:
-            failed += 1
-            continue
-
-        try:
-            await call_agent(node, "/api/peer/clear")
-        except:
-            pass
-
-        for peer in peers:
-            db.delete(peer)
-        db.delete(node)
-        success += 1
-
-    db.commit()
-    return {"message": f"成功删除 {success} 个节点", "success": success, "failed": failed}
-
-
-# ============ 导入导出 ============
-
-import json
-
-
-@router.get("/export")
-def export_nodes(
-    db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin)
-):
-    """导出节点配置"""
-    nodes = db.query(Node).all()
-
-    export_data = []
-    for node in nodes:
-        export_data.append({
-            "name": node.name,
-            "endpoint": node.endpoint,
-            "wg_port": node.wg_port,
-            "wg_interface": node.wg_interface,
-            "public_key": node.public_key,
-            "private_key": encryption.decrypt(node.private_key),
-            "address_pool": node.address_pool,
-            "dns": node.dns,
-            "mtu": node.mtu,
-            "keepalive": node.keepalive,
-            "default_upload_limit": node.default_upload_limit or 0,
-            "default_download_limit": node.default_download_limit or 0,
-            "api_url": node.api_url,
-            "key": node.key,
-            "blocked_patterns": node.blocked_patterns
-        })
-
-    return {"nodes": export_data, "count": len(export_data)}
-
-
-class NodeImport(BaseModel):
-    """节点导入数据"""
-    name: str
-    endpoint: str
-    wg_port: int = 51820
-    wg_interface: str = "wg0"
-    public_key: str
-    private_key: str
-    address_pool: str
-    dns: str = "8.8.8.8"
-    mtu: int = 1420
-    keepalive: int = 25
-    default_upload_limit: int = 0
-    default_download_limit: int = 0
-    api_url: str
-    key: str
-    blocked_patterns: Optional[str] = None
-
-
-class NodesImport(BaseModel):
-    """批量导入节点"""
-    nodes: List[NodeImport]
-
-
-@router.post("/import")
-def import_nodes(
-    data: NodesImport,
-    db: Session = Depends(get_db),
-    current_admin: AdminUser = Depends(get_current_admin)
-):
-    """导入节点配置"""
-    success = 0
-    failed = 0
-    errors = []
-
-    for node_data in data.nodes:
-        try:
-            # 检查名称是否已存在
-            if db.query(Node).filter(Node.name == node_data.name).first():
-                errors.append(f"节点 {node_data.name}: 名称已存在")
-                failed += 1
-                continue
-
-            node = Node(
-                name=node_data.name,
-                endpoint=node_data.endpoint,
-                wg_port=node_data.wg_port,
-                wg_interface=node_data.wg_interface,
-                public_key=node_data.public_key,
-                private_key=encryption.encrypt(node_data.private_key),
-                address_pool=node_data.address_pool,
-                dns=node_data.dns,
-                mtu=node_data.mtu,
-                keepalive=node_data.keepalive,
-                default_upload_limit=node_data.default_upload_limit,
-                default_download_limit=node_data.default_download_limit,
-                api_url=node_data.api_url,
-                key=node_data.key,
-                api_key="",
-                blocked_patterns=node_data.blocked_patterns,
-                status="active"
-            )
-            db.add(node)
-            success += 1
-        except Exception as e:
-            errors.append(f"节点 {node_data.name}: {str(e)}")
-            failed += 1
-
-    db.commit()
-    return {
-        "message": f"成功导入 {success} 个节点，失败 {failed} 个",
-        "success": success,
-        "failed": failed,
-        "errors": errors
-    }
