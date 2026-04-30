@@ -460,6 +460,80 @@ EOF
     log_info "数据库初始化完成"
 }
 
+# 配置 WireGuard（仅 agent 和 all 模式）
+setup_wireguard() {
+    if [[ $DEPLOY_MODE != "agent" && $DEPLOY_MODE != "all" ]]; then
+        return
+    fi
+
+    log_info "配置 WireGuard..."
+
+    local wg_interface="wg0"
+    local wg_port=51820
+    local wg_config="/etc/wireguard/${wg_interface}.conf"
+
+    # 如果配置已存在，跳过
+    if [[ -f "$wg_config" ]]; then
+        log_info "WireGuard 配置已存在，跳过"
+        return
+    fi
+
+    # 生成密钥对
+    local private_key=$(wg genkey)
+    local public_key=$(echo $private_key | wg pubkey)
+
+    # 从 .env 获取地址池配置（如果有的话）
+    local address_pool="10.100.0.0/24"
+    local gateway_ip="10.100.0.1"
+
+    # 创建配置文件
+    cat > $wg_config << EOF
+[Interface]
+Address = ${gateway_ip}/24
+ListenPort = ${wg_port}
+PrivateKey = ${private_key}
+SaveConfig = false
+
+# WireGuard 配置由 wg-manager 自动生成
+# 请在 Admin 端创建节点时使用以下公钥:
+# PublicKey = ${public_key}
+EOF
+
+    chmod 600 $wg_config
+
+    # 启用 IP 转发
+    echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-wireguard.conf
+    sysctl -p /etc/sysctl.d/99-wireguard.conf > /dev/null
+
+    # 配置 iptables 规则
+    local main_interface=$(ip route | grep default | awk '{print $5}' | head -1)
+    if [[ -n "$main_interface" ]]; then
+        # NAT 规则
+        iptables -t nat -A POSTROUTING -s ${address_pool} -o ${main_interface} -j MASQUERADE
+
+        # Forward 规则
+        iptables -A FORWARD -i ${wg_interface} -j ACCEPT
+        iptables -A FORWARD -o ${wg_interface} -j ACCEPT
+
+        # 保存规则
+        if command -v iptables-save &> /dev/null; then
+            iptables-save > /etc/iptables/rules.v4 2>/dev/null || true
+        fi
+    fi
+
+    # 启动 WireGuard
+    wg-quick up $wg_interface 2>/dev/null || true
+
+    echo ""
+    echo "=========================================="
+    echo "  WireGuard 节点公钥 (请在 Admin 端配置):"
+    echo "  ${public_key}"
+    echo "=========================================="
+    echo ""
+
+    log_info "WireGuard 配置完成"
+}
+
 # 配置防火墙
 configure_firewall() {
     log_info "配置防火墙..."
@@ -627,6 +701,7 @@ main() {
     create_directories
     generate_config
     init_database
+    setup_wireguard
     install_systemd_services
     configure_firewall
     show_result
