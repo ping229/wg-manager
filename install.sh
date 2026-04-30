@@ -412,14 +412,49 @@ init_database() {
     cd $INSTALL_DIR
     source venv/bin/activate
 
-    $PYTHON_CMD << 'EOF'
-from backend.shared.database import init_db, engine
-from backend.shared.models import Base
-
-# 创建所有表
+    case $DEPLOY_MODE in
+        portal)
+            $PYTHON_CMD << 'EOF'
+import sys
+sys.path.insert(0, '/opt/wg-manager')
+from backend.portal.database import init_db, engine
+from backend.portal.models import Base
 Base.metadata.create_all(bind=engine)
-print("Database initialized successfully")
+init_db()
+print("Portal database initialized successfully")
 EOF
+            ;;
+        admin)
+            $PYTHON_CMD << 'EOF'
+import sys
+sys.path.insert(0, '/opt/wg-manager')
+from backend.admin.database import init_db, engine
+from backend.admin.models import Base
+Base.metadata.create_all(bind=engine)
+init_db()
+print("Admin database initialized successfully")
+EOF
+            ;;
+        all)
+            $PYTHON_CMD << 'EOF'
+import sys
+sys.path.insert(0, '/opt/wg-manager')
+# 初始化 Portal 数据库
+from backend.portal.database import init_db as portal_init_db, engine as portal_engine
+from backend.portal.models import Base as PortalBase
+PortalBase.metadata.create_all(bind=portal_engine)
+portal_init_db()
+print("Portal database initialized successfully")
+
+# 初始化 Admin 数据库
+from backend.admin.database import init_db as admin_init_db, engine as admin_engine
+from backend.admin.models import Base as AdminBase
+AdminBase.metadata.create_all(bind=admin_engine)
+admin_init_db()
+print("Admin database initialized successfully")
+EOF
+            ;;
+    esac
 
     deactivate
     log_info "数据库初始化完成"
